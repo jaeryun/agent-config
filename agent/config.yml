@@ -1,0 +1,40 @@
+# Draft user-global OMP configuration. Not installed into ~/.omp/agent.
+# Role values own concrete model selectors; agent definitions reference roles.
+modelRoles:
+  default: openai-codex/gpt-6-astra:medium
+  slow: openai-codex/gpt-6.1-sol:high
+  task: opencode-go/deepseek-flash:high
+  smol: opencode-go/deepseek-flash:low
+  vision: openai-codex/gpt-6-luna:low
+  advisor: openai-codex/gpt-6.1-sol:max
+  tiny: "@smol"
+  commit: "@smol"
+
+modelRoleStorage: global
+
+plan:
+  enabled: false
+  defaultOnStartup: false
+
+advisor:
+  enabled: false
+
+prewalk:
+  enabled: false
+
+retry:
+  modelFallback: false
+
+task:
+  batch: true
+  maxConcurrency: 3
+  maxRecursionDepth: 1
+  enableEffort: false
+  enableLsp: true
+  prewalk: false
+  agentModelOverrides:
+    task: "@task"
+    sonic: "@smol"
+    scout: "@smol"
+    reviewer: "@slow"
+    security-reviewer: "@slow"

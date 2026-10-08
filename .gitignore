@@ -1,0 +1,26 @@
+# Personal overrides and credentials
+.env
+.env.*
+*.local.yml
+*.local.yaml
+auth.json
+credentials.json
+secrets.*
+
+# OMP runtime state is not configuration source
+*.db
+*.db-*
+*.log
+*.lock
+agent/sessions/
+agent/blobs/
+agent/cache/
+agent/logs/
+agent/terminal-sessions/
+agent/custom-session-files/
+agent/config-backups/
+
+# Local tooling
+.DS_Store
+node_modules/
+.tmp/
