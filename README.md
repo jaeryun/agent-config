@@ -1,6 +1,6 @@
 # 사용자 전역 OMP 구성 초안
 
-> 상태: 초안. 실제 `~/.omp/agent`에 설치하지 않았으며, 기존 전역 설정·지침·에이전트를 변경하지 않는다.
+> 상태: 초안. 실제 `~/.omp/agent`에는 아직 설치하지 않았다. 설치 스크립트를 실행하면 사용자 전역 설정과 지침이 적용된다.
 
 이 저장소는 프로젝트와 독립적인 사용자 전역 OMP 설정을 Git으로 관리한다. 남이 작성한 프롬프트를 기반으로 필요한 부분만 개편하고, 차용 원본과 실행용 수정본을 분리한다. 인증 정보·실행 로그·세션·캐시는 저장하지 않는다.
 
@@ -9,9 +9,7 @@
 ```text
 agent/
   config.yml                  # 모델 role과 OMP 기본 에이전트 바인딩
-  AGENTS.md                   # 메인 지침의 import와 OMP 로컬 정책
-  prompts/
-    orchestrator.md           # Agency Orchestrator + Handoff 기반 메인 지침
+  AGENTS.md                   # Agency Orchestrator + Handoff와 OMP 로컬 정책
   agents/
     architect.md              # Software Architect 원문 기반
     verifier.md               # Evidence Collector 원문 기반
@@ -22,13 +20,15 @@ agent/
     engineering/engineering-software-architect.md
     testing/testing-evidence-collector.md
     strategy/coordination/handoff-templates.md
+scripts/
+  install.sh                  # 기존 설정을 병합하는 심볼릭링크 설치
 ```
 
 - 구체적인 모델과 effort는 `config.yml`만 수정한다. 추가 에이전트는 role을 참조한다.
 - OMP 기본 `task`, `sonic`, `scout`, `reviewer`, `security-reviewer`는 기존 프롬프트를 유지하고 모델 배정만 지정한다.
 - 메인은 조율만 담당한다. 설계·검증과 구현은 해당 작업자에게 맡기며 플랜 모드를 사용하지 않는다.
 - advisor 모델은 배정하되 기본 비활성화한다. 호출별 effort 자동 변경, prewalk와 자동 모델 fallback은 사용하지 않는다.
-- `AGENTS.md`의 `@prompts/orchestrator.md`는 OMP context import로 확장한다. 독립된 오케스트레이터 서브에이전트를 추가하지 않는다.
+- 오케스트레이터 내용은 표준 메인 지침 파일인 `AGENTS.md`에 직접 둔다. `prompts/`나 별도 오케스트레이터 서브에이전트를 추가하지 않는다.
 
 ## 이미지 처리 경계
 
@@ -65,11 +65,10 @@ agent/
 
 | 실행용 파일 | 유지한 원문 | 필요한 개편 |
 |---|---|---|
-| `prompts/orchestrator.md` | 오케스트레이터의 mission·gate·state·context·성공 기준, 인계 template와 실패 피드백 필드 | 실행하지 않을 agency pipeline·roster·예시 명령·예측을 제외하고 역할명·재시도 기준을 조정 |
+| `AGENTS.md` | 오케스트레이터의 mission·gate·state·context·성공 기준, 인계 template와 실패 피드백 필드 | 실행하지 않을 agency pipeline·roster·예시 명령·예측을 제외하고 역할명·재시도 기준과 OMP 배정·이미지·권한 정책을 조정 |
 | `agents/architect.md` | 설계 원문 대부분, DDD·패턴 선택표·경계·ADR template | OMP frontmatter, 허구의 기억·경험 제거, 의무 ADR·대안 개수 완화, 읽기 전용·이미지 경계 추가 |
 | `agents/verifier.md` | QA 원문 대부분, 증거 기준·UI 검증법·보고 template | 고정 Laravel·포트·캡처 명령과 미존재 참조 제거, 직접 시각 관찰을 Luna의 텍스트 관찰로 대체, scope·실행·이미지 경계 추가 |
 | `agents/image-analyst.md` | QA의 Core Beliefs와 Visual Evidence Analysis | 범용 이미지 범위·선택적 브라우저 캡처·불확실성·텍스트 전용 인계 추가 |
-| `AGENTS.md` | 원문 기반 메인 지침을 import | OMP 역할 배정·동시 작업·이미지 격리·권한 경계만 정의 |
 
 원문 내 template와 UI 예시는 요청된 범위에 맞는 경우에만 사용한다. 별도 문서 생성, 지정 viewport·포트·품질 등급이나 특정 수정 회차를 자동 요구하지 않는다. 인기도나 원문 보존 자체가 행동 품질을 증명하지는 않는다.
 
@@ -81,18 +80,52 @@ agent/
 PI_CODING_AGENT_DIR="$PWD/agent" omp config get modelRoles --json
 ```
 
-runtime smoke는 임시 HOME의 `.omp/agent`에 이 초안을 복사하고, 실제 OMP RPC의 `get_state`로 확인한다. 사용자 에이전트 탐색은 HOME 기반이므로 `PI_CODING_AGENT_DIR`만 바꾼 검증으로 충분하다고 가정하지 않는다. 본 초안 확인에서는 모델 요청을 보내지 않으며, parser·import·roster 로드를 모델 행동이나 실제 이미지 분석의 통과로 확대하지 않는다.
+runtime smoke는 임시 HOME의 `.omp/agent`에 설치하고 실제 OMP RPC의 `get_state`로 확인한다. 사용자 에이전트 탐색은 HOME 기반이므로 `PI_CODING_AGENT_DIR`만 바꾼 검증으로 충분하다고 가정하지 않는다. 모델 요청을 보내지 않은 parser·roster 로드 검증을 모델 행동이나 실제 이미지 분석의 통과로 확대하지 않는다.
 
-## 향후 전역 적용
+## 심볼릭링크 설치
 
-아직 installer나 배포 자동화를 추가하지 않는다. 적용할 때는 다음 경계를 지킨다.
+필요한 실행 파일은 Bash, `omp`, Python 3이다. 저장소 루트에서 먼저 적용 예정 경로를 확인하고 설치한다.
 
-1. 기존 사용자 `config.yml`의 관련 값만 병합한다. 인증·브라우저·확장 등 다른 개인 설정을 보존한다.
-2. `AGENTS.md`, `prompts/`, 추가 에이전트, `upstream/`과 라이선스를 함께 배치한다. 기존 파일 덮어쓰기·삭제는 차이를 확인한다.
-3. 기존 `rules/astra-flash-coordination.mdc`의 충돌하는 두 모델 정책을 정리한다. 필요한 협업·Ouroboros 제한은 이 초안에 보존했다.
-4. 메인 `AGENTS.md`가 task 작업자에 그대로 상속되지 않는 OMP 계약을 고려한다. 작업자별 경계는 각각의 프롬프트에도 둔다.
-5. 프로젝트 정의는 수정하지 않는다. 같은 이름이면 프로젝트 에이전트가 우선하므로 실제 모델과 프롬프트를 확인한다.
-6. 새 세션에서 실제 구현·검증·이미지 질문을 smoke 실행한 뒤 행동 품질과 비용을 평가한다.
+```sh
+./scripts/install.sh --dry-run
+./scripts/install.sh
+```
+
+기본 대상은 `PI_CODING_AGENT_DIR`이 있으면 해당 경로, 없으면 `~/.omp/agent`이다. 다른 사용자 디렉터리나 프로필을 지정할 수 있다.
+
+```sh
+./scripts/install.sh --agent-dir "$HOME/.omp/profiles/work/agent"
+```
+
+### 연결과 설정 병합
+
+- `AGENTS.md`, 에이전트 파일 3개, `upstream/agency-agents`는 이 저장소의 정본에 직접 링크한다. 다른 사용자 에이전트와 파일은 그대로 둔다.
+- 기존 `config.yml` 또는 `config.yaml`을 임시 디렉터리에 복사하고, OMP의 실제 설정 CLI로 초안이 관리하는 키만 병합한다. 사용자 정의 role·에이전트 바인딩과 관련 없는 브라우저·확장·개인 설정을 보존한다.
+- 병합한 설정은 `${XDG_STATE_HOME:-$HOME/.local/state}/omp-config/<대상 경로 해시>/config.yml`에 비공개 파일로 저장한다. 전역 `config.yml`은 이 파일에 링크한다. 개인 설정을 Git 저장소에 복사하지 않는다.
+- 초안 설정 값을 설치 스크립트에 복제하지 않는다. 관리 키 목록은 스크립트에 명시하며, 새 관리 키를 추가할 때는 목록도 갱신한다.
+- 프롬프트 변경은 링크를 통해 연결되지만, 진행 중인 세션의 이미 로드한 지침까지 자동 갱신된다고 가정하지 않는다. 새 세션에서 확인한다.
+- `agent/config.yml`을 수정하면 설치 스크립트를 다시 실행해 병합한다. OMP 설정 편집이 전역 링크를 일반 파일로 교체한 경우도 재실행하면 현재 값을 보존해 다시 연결한다.
+
+### 백업과 실패
+
+- 충돌하는 기존 파일·링크는 `<사용자 agent 디렉터리>/install-backups/<시각>-<PID>/`에 보존한다. 같은 링크와 같은 설정으로 재실행하면 불필요한 교체·백업을 하지 않는다.
+- 알려진 구형 `rules/astra-flash-coordination.mdc`가 있으면 백업 후 비활성화한다. 다른 규칙은 수정하지 않는다.
+- 설치 중 오류가 나면 이번 실행에서 바꾼 링크와 생성한 설정을 되돌린다. 외부 프로세스가 동시에 바꾼 경로는 덮어쓰지 않고 복구 충돌을 보고한다. 백업은 자동 삭제하지 않는다.
+- 대상별 lock으로 동시 설치를 막는다. 강제 종료로 lock이 남았다면 다른 설치가 실행 중이 아닌지 확인한 뒤 보고된 lock 디렉터리를 정리한다.
+- `--dry-run`은 임시 설정을 병합해 계획만 보여주며 대상과 비공개 설치 상태를 바꾸지 않는다.
+- YAML 설정 없이 legacy `settings.json` 또는 `agent.db`만 있으면 설치를 중단한다. 먼저 OMP가 기존 설정을 YAML로 마이그레이션하도록 한다.
+- 소스 저장소 내부를 설치 대상이나 개인 상태 경로로 지정하지 못하게 한다.
+
+실제 전역 적용 후에는 새 세션에서 모델 배정과 구현·검증·이미지 질문을 smoke 실행해야 한다. 프로젝트 정의는 수정하지 않으며, 같은 이름이면 프로젝트 에이전트가 전역 정의보다 우선한다. 메인 `AGENTS.md`가 task 작업자에 그대로 상속되지 않으므로 작업자별 경계도 각각의 프롬프트에 유지한다.
+
+## 검증한 범위
+
+- Bash 문법 검사와 실제 설치 스크립트 실행을 확인했다.
+- 임시 사용자 디렉터리에서 dry-run 무변경, 링크 6개 생성, 기존 파일 백업, 개인 설정·사용자 정의 role·다른 에이전트 보존, legacy 규칙 비활성화를 확인했다.
+- 같은 설정으로 재실행할 때 불필요한 교체·백업이 없으며, 설치 후 편집한 개인 설정도 재설치 시 보존되는 것을 확인했다.
+- 설치 도중 실제 파일 경로 오류를 발생시켜 메인 지침·legacy 규칙 복구와 생성 설정·lock 정리를 확인했다. 기존 `config.yaml` 병합과 소스 저장소 내부 설치 거부도 확인했다.
+- 설치된 링크를 실제 OMP RPC로 로드해 Astra medium, 추가 에이전트 3개, 통합된 메인·인계·이미지 정책을 확인했다.
+- 실제 사용자 전역 디렉터리는 변경하지 않았다. 모델 요청을 보내지 않았으므로 작업 품질, 이미지 격리 준수와 비용 절감은 아직 미검증이다.
 
 ## Git 관리
 
