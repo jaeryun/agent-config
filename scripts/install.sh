@@ -39,6 +39,34 @@ paths=(AGENTS.md agents/architect.md agents/verifier.md agents/image-analyst.md 
 sources=("$repo_dir/agent/AGENTS.md" "$repo_dir/agent/agents/architect.md" "$repo_dir/agent/agents/verifier.md" "$repo_dir/agent/agents/image-analyst.md" "$repo_dir/agent/upstream/agency-agents" "$state_config")
 legacy_rule='rules/astra-flash-coordination.mdc'
 
+# Validate parents, not managed leaf links: leaf links to the repo are intended.
+validate_layout() {
+  python3 - "$repo_dir" "$agent_dir" "$state_dir" "$backup_dir" "${paths[@]}" "$legacy_rule" <<'PY'
+import os, sys
+
+repo, agent, state, backup, *managed = sys.argv[1:]
+def inside(path, root):
+    return os.path.commonpath((path, root)) == root
+def reject(message):
+    raise SystemExit("Unsafe installation layout: " + message)
+
+if os.path.realpath(agent) != agent:
+    reject("install target changed through a symlink")
+if os.path.islink(state) or os.path.realpath(state) != state:
+    reject("private state directory must not redirect through symlinks")
+if inside(state, repo):
+    reject("private state resolves inside the source repository")
+if inside(state, agent) or inside(agent, state):
+    reject("private state and install target must be disjoint directories")
+if os.path.realpath(backup) != backup or not inside(backup, agent) or inside(backup, repo):
+    reject("backup directory must remain inside the install target and outside source")
+for relative in managed:
+    parent = os.path.realpath(os.path.dirname(os.path.join(agent, relative)))
+    if not inside(parent, agent) or inside(parent, repo):
+        reject("managed destination parent escapes the install target: " + relative)
+PY
+}
+
 for index in 0 1 2 3; do
   [[ -f "${sources[$index]}" && -r "${sources[$index]}" ]] || die "Missing source: ${sources[$index]}"
 done
@@ -49,6 +77,7 @@ for relative in "${paths[@]}" "$legacy_rule"; do
     die "Expected a file, found a directory: $destination"
   fi
 done
+validate_layout
 [[ ! -L "$state_config" && ! -d "$state_config" ]] || die "Private merged config must be a regular file: $state_config"
 if [[ -L "$agent_dir/config.yml" && ! -e "$agent_dir/config.yml" ]]; then
   die "Existing config symlink is broken: $agent_dir/config.yml"
@@ -60,13 +89,18 @@ changed_sources=()
 state_changed=false
 state_had_original=false
 committed=false
-lock_held=false
 next_config=''
 
 cleanup() {
   exit_code=$?
   set +e
-  if [[ "$committed" == false ]]; then
+  trap '' INT TERM
+  layout_safe=true
+  if ! validate_layout; then
+    layout_safe=false
+    printf 'Layout changed externally; leaving target/state paths for manual recovery.\n' >&2
+  fi
+  if [[ "$committed" == false && "$layout_safe" == true ]]; then
     for ((index=${#changed_paths[@]}-1; index>=0; index--)); do
       relative="${changed_paths[$index]}"
       destination="$agent_dir/$relative"
@@ -75,23 +109,35 @@ cleanup() {
         rm -f -- "$destination"
       fi
       if [[ -e "$destination" || -L "$destination" ]]; then
-        printf 'Rollback conflict; recover from backup manually: %s\n' "$destination" >&2
+        if [[ -e "$backup_dir/$relative" || -L "$backup_dir/$relative" ]]; then
+          printf 'Rollback conflict; recover from backup manually: %s\n' "$destination" >&2
+        fi
       elif [[ -e "$backup_dir/$relative" || -L "$backup_dir/$relative" ]]; then
         mv -- "$backup_dir/$relative" "$destination"
       fi
     done
     if [[ "$state_changed" == true ]]; then
-      if ! cmp -s -- "$stage/agent/config.yml" "$state_config"; then
-        printf 'Rollback conflict; merged config changed externally: %s\n' "$state_config" >&2
-      elif [[ "$state_had_original" == true ]]; then
-        cp -p -- "$backup_dir/merged-config.yml" "$state_config"
+      if [[ ! -L "$state_config" && -f "$state_config" ]] && cmp -s -- "$stage/agent/config.yml" "$state_config"; then
+        if [[ "$state_had_original" == true ]]; then
+          cp -p -- "$backup_dir/merged-config.yml" "$state_config"
+        else
+          rm -f -- "$state_config"
+        fi
+      elif [[ "$state_had_original" == true && ! -L "$state_config" ]] && cmp -s -- "$backup_dir/merged-config.yml" "$state_config"; then
+        : # Publication did not complete; the original config is still present.
+      elif [[ "$state_had_original" == false && ! -e "$state_config" && ! -L "$state_config" ]]; then
+        : # Publication did not complete and there was no original config.
       else
-        rm -f -- "$state_config"
+        printf 'Rollback conflict; merged config changed externally: %s\n' "$state_config" >&2
       fi
     fi
   fi
-  [[ "$lock_held" == false ]] || rmdir -- "$state_dir/.install-lock"
-  [[ -z "$next_config" ]] || rm -f -- "$next_config"
+  if [[ "$layout_safe" == true ]]; then
+    if [[ -L "$state_dir/.install-lock" && "$(readlink "$state_dir/.install-lock")" == "$stage" ]]; then
+      rm -f -- "$state_dir/.install-lock"
+    fi
+    [[ -z "$next_config" ]] || rm -f -- "$next_config"
+  fi
   rm -rf -- "$stage"
   return "$exit_code"
 }
@@ -102,8 +148,11 @@ trap 'exit 143' TERM
 mkdir -p -- "$stage/agent" "$stage/workspace"
 if [[ "$dry_run" == false ]]; then
   mkdir -p -- "$agent_dir" "$state_dir"
-  mkdir -- "$state_dir/.install-lock" 2>/dev/null || die "Another installation or stale lock exists: $state_dir/.install-lock"
-  lock_held=true
+  validate_layout
+  # One syscall acquires the lock and stamps ownership; no post-acquire flag.
+  python3 -c 'import os, sys; os.symlink(sys.argv[1], sys.argv[2])' \
+    "$stage" "$state_dir/.install-lock" 2>/dev/null \
+    || die "Unable to acquire install lock (existing lock or permissions): $state_dir/.install-lock"
 fi
 if [[ -f "$agent_dir/config.yml" ]]; then
   cp -pL -- "$agent_dir/config.yml" "$stage/agent/config.yml"
@@ -170,6 +219,7 @@ if [[ "$dry_run" == true ]]; then
   exit 0
 fi
 
+validate_layout
 if ! cmp -s -- "$stage/agent/config.yml" "$state_config"; then
   if [[ -f "$state_config" ]]; then
     mkdir -p -- "$backup_dir"
@@ -179,8 +229,8 @@ if ! cmp -s -- "$stage/agent/config.yml" "$state_config"; then
   next_config="$state_dir/config.yml.next.$$"
   cp -- "$stage/agent/config.yml" "$next_config"
   chmod 600 "$next_config"
-  mv -- "$next_config" "$state_config"
   state_changed=true
+  mv -- "$next_config" "$state_config"
 fi
 
 replace_destination() {
@@ -189,13 +239,16 @@ replace_destination() {
     printf 'Already linked: %s\n' "$destination"
     return
   fi
+  validate_layout
   mkdir -p -- "$(dirname -- "$destination")"
+  # Journal before the move: INT/TERM may arrive immediately after publication.
+  # Path count publishes only complete records, even if a signal splits appends.
+  changed_sources+=("$source")
+  changed_paths+=("$relative")
   if [[ -e "$destination" || -L "$destination" ]]; then
     mkdir -p -- "$(dirname -- "$backup_dir/$relative")"
     mv -- "$destination" "$backup_dir/$relative"
   fi
-  changed_paths+=("$relative")
-  changed_sources+=("$source")
   if [[ -n "$source" ]]; then
     ln -s -- "$source" "$destination"
     printf 'Linked %s -> %s\n' "$destination" "$source"
