@@ -3,11 +3,13 @@
 .env.*
 *.local.yml
 *.local.yaml
+config.local.yaml
+.local/
 auth.json
 credentials.json
 secrets.*
 
-# OMP runtime state is not configuration source
+# Client runtime state is not configuration source
 *.db
 *.db-*
 *.log
@@ -24,3 +26,4 @@ agent/config-backups/
 .DS_Store
 node_modules/
 .tmp/
+.agent-config/

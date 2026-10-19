@@ -1,0 +1,71 @@
+# Copy to config.local.yaml; the local file and .local/ are ignored by Git.
+# Paths are relative to this YAML. Store private role prompts under .local/.
+# Models use exact provider/model-id strings, never credentials or role aliases.
+# model/effort may also be {omp: value, pi: value}; both clients are required.
+# inherit preserves the main selection and the worker model.
+# OMP workers require explicit effort; pi can inherit the parent's live effort.
+# medium is an example, not a capability guarantee: check the selected model.
+version: 1
+concurrency: 3
+agents:
+  orchestrator:
+    description: Own request understanding, delegation, integration, and completion.
+    definition: agent/AGENTS.md
+    model: inherit
+    effort: inherit
+  task:
+    description: Implement a cohesive change using existing design and conventions.
+    definition: agent/agents/task.md
+    model: inherit
+    effort: {omp: medium, pi: inherit}
+    tools:
+      omp: [read, grep, glob, bash, eval, edit, write, web_search]
+      pi: [read, bash, edit, write, grep, find, ls]
+  sonic:
+    description: Apply an explicit mechanical transformation or collect bounded facts.
+    definition: agent/agents/sonic.md
+    model: inherit
+    effort: {omp: medium, pi: inherit}
+    tools:
+      omp: [read, grep, glob, bash, edit, write]
+      pi: [read, bash, edit, write, grep, find, ls]
+  scout:
+    description: Explore an unmapped subsystem and return sourced findings without edits.
+    definition: agent/agents/scout.md
+    model: inherit
+    effort: {omp: medium, pi: inherit}
+    tools:
+      omp: [read, grep, glob, web_search]
+      pi: [read, grep, find, ls]
+  deep:
+    description: Resolve ambiguous bugs and design-sensitive implementation end to end.
+    definition: agent/agents/deep.md
+    model: inherit
+    effort: {omp: medium, pi: inherit}
+    tools:
+      omp: [read, grep, glob, bash, eval, edit, write, web_search]
+      pi: [read, bash, edit, write, grep, find, ls]
+  reviewer:
+    description: Review correctness and compatibility with evidence-backed findings only.
+    definition: agent/agents/reviewer.md
+    model: inherit
+    effort: {omp: medium, pi: inherit}
+    tools:
+      omp: [read, grep, glob]
+      pi: [read, grep, find, ls]
+  security-reviewer:
+    description: Review trust boundaries and report concrete security defects without edits.
+    definition: agent/agents/security-reviewer.md
+    model: inherit
+    effort: {omp: medium, pi: inherit}
+    tools:
+      omp: [read, grep, glob]
+      pi: [read, grep, find, ls]
+  image-analyst:
+    description: Inspect images and return text observations and evidence paths, never pixels.
+    definition: agent/agents/image-analyst.md
+    model: inherit
+    effort: {omp: medium, pi: inherit}
+    tools:
+      omp: [read, eval, write]
+      pi: [read, bash]
