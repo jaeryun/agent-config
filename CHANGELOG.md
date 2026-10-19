@@ -1,6 +1,28 @@
 # 변경 이력
 
-## 2026-10-19
+## 2026-10-19 · 기존 pi-subagents로 전환
+
+### 수정
+
+- 자체 `agent_config_task` 실행 어댑터와 전용 TypeScript 설정을 삭제했다. pi의 실행은 기존 `nicobailon/pi-subagents`에 맡긴다.
+- pi 설치 결과를 플러그인의 `<agent-dir>/agents/*.md`로 변경하고, `model`·`thinking`·`tools` 등 실제 frontmatter 계약에 맞췄다. OMP 문맥 문자열과 pi `options.context` 선택값을 구분하고 기존 플러그인의 workflow·작업자 관리 기능을 사용하도록 했다.
+- 지원 플러그인과 버전을 설치 전 확인한다. 표준 npm 경로를 자동 확인하고 git/local 설치에는 `--pi-subagents-dir`를 제공한다. 다른 동명 플러그인이나 미지원 버전을 자동 교체하지 않는다.
+- concurrency는 플러그인 config의 관련 leaf만 관리한다. 기존 플러그인 설정과 나중에 추가한 설정을 보존한다. 상충하는 역할 override·thinking 기본값은 무시하거나 삭제하지 않고 보고한다.
+- 이전 설치 상태가 소유한 자체 확장 파일은 재설치 때 제거한다. 알 수 없거나 변경된 파일은 덮어쓰지 않으며 기존 pi-subagents 패키지는 유지한다.
+- 공식 표준이라는 근거 없는 표현 대신 공식 패키지 목록·npm 지표·실제 기능 계약을 조사해 지원 대상을 선택하고 [근거](REFERENCES.md#pi-서브에이전트-선택-근거)를 기록했다.
+
+### 확인 범위
+
+- macOS arm64에서 `@earendil-works/pi-coding-agent` **1.3.0**과 실제 `pi-subagents` **0.79.1**을 사용했다.
+- `npm test` **13개 통과**: OMP/pi 설정 보존, 플러그인 미설치 거부, override 충돌 거부, 기존 자체 실행기 제거·원복 경계, 네이티브 플러그인 통합 실행을 확인했다.
+- 통합 검사는 실제 pi CLI로 실제 플러그인을 설치·로딩하고 네이티브 `subagent`를 호출했다. `scout`은 부모 모델·medium을 상속했고, `task`는 명시한 다른 모델·high로 실제 `read` 도구를 실행해 파일 내용을 부모로 반환했다. 읽기 전용 scout에 쓰기·셸 도구가 없는 것과 작업자의 재위임 도구가 없는 것도 확인했다.
+- 초기 통합 검사에서 플러그인이 YAML inline 빈 배열을 `allowedAgents` 이름으로 해석하는 문제를 발견했다. 지원되지 않는 중복 선언을 제거하고 `allowNestedSubagents: false`와 명시적 도구 목록으로 재위임 금지를 표현한 뒤 실행 경로가 통과했다.
+- 별도 임시 프로필에서 공식 `pi install npm:pi-subagents@0.79.1`, 설치기의 표준 npm 경로 자동 확인, 실제 `/subagents-models` 명령의 역할 조회도 확인했다.
+- 로컬 OpenAI-compatible endpoint의 결정적 응답으로 모델·effort 전달과 도구 실행을 확인했다. 상용 모델 호출, 답변 품질, 이미지 정책 준수, 모든 plugin 기능이나 다른 OS·버전의 검증은 아니다. 사용자 전역 환경은 변경하지 않았다.
+
+## 2026-10-19 · 이전 자체 어댑터 구성 (폐기)
+
+아래 pi 검증 기록은 자체 어댑터에 대한 과거 기록이다. 기존 pi-subagents 플러그인 호환성이나 현재 지원 버전의 근거가 아니다.
 
 ### 구성과 설치
 

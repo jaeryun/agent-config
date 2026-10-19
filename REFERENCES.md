@@ -10,7 +10,28 @@
 - [pi 확장 API](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
 - [pi 공식 서브에이전트 예제](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent/examples/extensions/subagent)
 
-pi 어댑터는 공식 확장 API와 별도 CLI 프로세스를 사용한다. 공식 예제의 전체 UI·체인·에이전트 발견 체계를 가져오지 않는다. 이 저장소의 YAML로 생성한 역할만 실행하고, OMP의 내부 통신 프로토콜을 pi에 흉내 내지 않는다. `main` 링크의 문서는 변할 수 있으므로 실제 지원 판단은 설치된 버전과 실행 확인을 기준으로 한다.
+pi 실행은 기존 `nicobailon/pi-subagents`에 맡긴다. 자체 확장·runner 코드는 제공하지 않는다. 변환 계약은 설치된 패키지의 버전별 문서로 확인하며, `main` 문서의 변경을 검증 없이 적용하지 않는다.
+
+## pi 서브에이전트 선택 근거
+
+공식 단일 표준이 지정되어 있다는 근거는 찾지 못했다. 공식 예제는 확장 API 참고 구현이며, 배포된 플러그인과 같은 설정·기능 계약으로 취급하지 않는다.
+
+2026-10-19에 확인한 npm의 직전 한 달 집계 기간은 2026-09-19~2026-10-18이다.
+
+| 후보 | npm 다운로드 | 판단 |
+|---|---:|---|
+| [`pi-subagents`](https://api.npmjs.org/downloads/point/last-month/pi-subagents) (`nicobailon`) | 572,984 | 기본 지원 대상으로 선택했다. |
+| [`@tintinweb/pi-subagents`](https://api.npmjs.org/downloads/point/last-month/@tintinweb/pi-subagents) | 34,762 | 다른 패키지이며 현재 변환 대상이 아니다. |
+| [`pi-simple-agents`](https://api.npmjs.org/downloads/point/last-month/pi-simple-agents) | 1,715 | 별도 구현이며 현재 변환 대상이 아니다. |
+
+다운로드는 사용자 수나 품질 보증이 아니며 재설치·CI·의존성 사용도 포함할 수 있다. [공식 Pi 패키지 목록](https://pi.dev/packages/pi-subagents)에 등록된 점, [저장소](https://github.com/nicobailon/pi-subagents)의 유지보수와 역할·모델·thinking·작업자 관리 계약을 함께 고려했다. 조회 당시 GitHub 지표는 3,962 stars, 816 forks였고 npm 최신 버전은 0.79.1이었다. 이를 “공식 업계 표준”이라고 단정하지 않는다.
+
+변환에 사용한 고정 버전 문서:
+
+- [0.79.1 에이전트·frontmatter](https://cdn.jsdelivr.net/npm/pi-subagents@0.79.1/docs/agents.md)
+- [0.79.1 모델·thinking 우선순위](https://cdn.jsdelivr.net/npm/pi-subagents@0.79.1/docs/models.md)
+- [0.79.1 native configuration](https://cdn.jsdelivr.net/npm/pi-subagents@0.79.1/docs/configuration.md)
+- [0.79.1 subagent·workflow 호출](https://cdn.jsdelivr.net/npm/pi-subagents@0.79.1/docs/tool-reference.md)
 
 ## 운영 정책의 참고 자료
 

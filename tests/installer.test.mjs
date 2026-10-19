@@ -33,7 +33,13 @@ async function fixture(t, client) {
   await writeFile(settingsPath, client === 'omp' ? YAML.stringify(initial) : JSON.stringify(initial, null, 2));
   const originalPolicy = '# Personal instructions\nNever edit my private notes.\n';
   await writeFile(join(target, 'AGENTS.md'), originalPolicy);
-  const command = (...args) => spawnSync('bash', [join(repo, 'scripts/install.sh'), '--client', client, '--config', configPath, '--agent-dir', target, ...args], {
+  const pluginConfigPath = join(target, 'extensions/subagent/config.json');
+  if (client === 'pi') {
+    await mkdir(join(target, 'extensions/subagent'), { recursive: true });
+    await writeFile(pluginConfigPath, JSON.stringify({ globalConcurrencyLimit: 5, parallel: { concurrency: 4, maxTasks: 9 }, toolActivation: 'eager' }));
+  }
+  const pluginArgs = client === 'pi' ? ['--pi-subagents-dir', join(repo, 'node_modules/pi-subagents')] : [];
+  const command = (...args) => spawnSync('bash', [join(repo, 'scripts/install.sh'), '--client', client, '--config', configPath, '--agent-dir', target, ...pluginArgs, ...args], {
     cwd: repo,
     env: { ...process.env, HOME: root, XDG_STATE_HOME: join(root, 'state'), PI_CODING_AGENT_DIR: target },
     encoding: 'utf8', timeout: 30000,
@@ -45,7 +51,7 @@ async function fixture(t, client) {
   };
   const readSettings = async () => YAML.parse(await readFile(settingsPath, 'utf8'));
   const writeSettings = (value) => writeFile(settingsPath, client === 'omp' ? YAML.stringify(value) : JSON.stringify(value, null, 2));
-  return { root, target, config, configPath, settingsPath, initial, originalPolicy, command, run, readSettings, writeSettings };
+  return { root, target, config, configPath, settingsPath, initial, originalPolicy, command, run, readSettings, writeSettings, pluginConfigPath };
 }
 
 for (const client of ['omp', 'pi']) {
@@ -64,6 +70,12 @@ for (const client of ['omp', 'pi']) {
     } else {
       assert.equal(settings.defaultModel, 'main');
       assert.equal(settings.defaultThinkingLevel, 'high');
+      const plugin = JSON.parse(await readFile(f.pluginConfigPath, 'utf8'));
+      assert.equal(plugin.globalConcurrencyLimit, 2);
+      assert.equal(plugin.parallel.concurrency, 2);
+      assert.equal(plugin.parallel.maxTasks, 9);
+      plugin.artifactDir = 'session';
+      await writeFile(f.pluginConfigPath, JSON.stringify(plugin));
     }
     settings.custom.afterInstall = 'keep this';
     if (client === 'omp') settings.extensions.push('user-added-extension');
@@ -83,7 +95,11 @@ for (const client of ['omp', 'pi']) {
     if (client === 'omp') {
       assert.equal(settings.task.agentModelOverrides.task, 'example/old:low');
       assert.deepEqual(settings.extensions, ['original-extension', 'user-added-extension']);
-    } else assert.equal(settings.defaultModel, 'main');
+    } else {
+      assert.equal(settings.defaultModel, 'main');
+      const plugin = JSON.parse(await readFile(f.pluginConfigPath, 'utf8'));
+      assert.deepEqual(plugin, { globalConcurrencyLimit: 5, parallel: { concurrency: 4, maxTasks: 9 }, toolActivation: 'eager', artifactDir: 'session' });
+    }
   });
 
   test(`${client}: dry-run and invalid configuration do not change existing files`, async (t) => {
@@ -145,8 +161,64 @@ test('Pi can remove every worker while retaining the orchestrator and user setti
   await writeFile(f.configPath, YAML.stringify(f.config));
   f.run();
   assert.ok((await readFile(join(f.target, 'AGENTS.md'), 'utf8')).includes('Test orchestrator'));
-  await assert.rejects(readFile(join(f.target, 'extensions/agent-config/index.ts')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(f.target, 'agents/task.md')), { code: 'ENOENT' });
   assert.deepEqual((await f.readSettings()).custom, f.initial.custom);
   f.run('--uninstall');
   assert.equal(await readFile(join(f.target, 'AGENTS.md'), 'utf8'), f.originalPolicy);
+});
+
+test('Pi refuses missing plugin and keeps user configuration untouched', async (t) => {
+  const f = await fixture(t, 'pi');
+  const before = await readFile(f.pluginConfigPath, 'utf8');
+  const result = f.command('--pi-subagents-dir', join(f.root, 'not-installed'));
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /pi install npm:pi-subagents/);
+  assert.equal(await readFile(f.pluginConfigPath, 'utf8'), before);
+  assert.equal(await readFile(join(f.target, 'AGENTS.md'), 'utf8'), f.originalPolicy);
+});
+
+test('Pi refuses role overrides that would silently replace the YAML model', async (t) => {
+  const f = await fixture(t, 'pi');
+  const settings = await f.readSettings();
+  settings.subagents = { agentOverrides: { task: { model: 'another/model' } } };
+  await f.writeSettings(settings);
+  const result = f.command();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /agentOverrides.task/);
+  assert.equal(await readFile(join(f.target, 'AGENTS.md'), 'utf8'), f.originalPolicy);
+  assert.deepEqual((await f.readSettings()).subagents, settings.subagents);
+});
+
+test('Pi rejects a global thinking default when parent effort inheritance was requested', async (t) => {
+  const f = await fixture(t, 'pi');
+  const settings = await f.readSettings();
+  settings.subagents = { defaultThinking: 'low' };
+  await f.writeSettings(settings);
+  const result = f.command();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /effort=inherit conflicts/);
+  assert.equal(await readFile(join(f.target, 'AGENTS.md'), 'utf8'), f.originalPolicy);
+});
+
+test('Pi cutover removes the old managed runner without modifying the native plugin', async (t) => {
+  const f = await fixture(t, 'pi');
+  f.run();
+  const states = await readdir(join(f.root, 'state/agent-config'));
+  const manifestPath = join(f.root, 'state/agent-config', states[0], 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  // The previous release stored these exact relative paths with version-1 ownership records.
+  for (const relative of ['extensions/agent-config/index.ts', 'extensions/agent-config/config.json']) {
+    const content = relative.endsWith('.json') ? '{\"version\":1,\"agents\":[]}' : '// previous managed runner\\n';
+    await mkdir(join(f.target, 'extensions/agent-config'), { recursive: true });
+    await writeFile(join(f.target, relative), content, { mode: 0o600 });
+    manifest.files[relative] = { before: null, installed: { content, mode: 0o600 } };
+  }
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  const nativeConfig = await readFile(f.pluginConfigPath, 'utf8');
+  f.run();
+  await assert.rejects(readFile(join(f.target, 'extensions/agent-config/index.ts')), { code: 'ENOENT' });
+  await assert.rejects(readFile(join(f.target, 'extensions/agent-config/config.json')), { code: 'ENOENT' });
+  assert.equal(await readFile(f.pluginConfigPath, 'utf8'), nativeConfig);
+  f.run('--uninstall');
+  await assert.rejects(readFile(join(f.target, 'extensions/agent-config/index.ts')), { code: 'ENOENT' });
 });

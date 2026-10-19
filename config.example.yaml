@@ -5,6 +5,9 @@
 # inherit preserves the main selection and the worker model.
 # OMP workers require explicit effort; pi can inherit the parent's live effort.
 # medium is an example, not a capability guarantee: check the selected model.
+# Pi uses existing nicobailon/pi-subagents, not a repository-owned runner.
+# Pi concurrency maps to native per-run defaults, not a cross-run scheduler.
+# Pi effort inheritance requires no conflicting subagents.defaultThinking.
 version: 1
 concurrency: 3
 agents:

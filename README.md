@@ -2,30 +2,39 @@
 
 **메인 오케스트레이터와 전문 서브에이전트의 역할·행동·협업 체계를 정의하고, 개인 YAML을 기준으로 OMP와 pi에 적용하는 저장소다.**
 
-에이전트 정의는 이 저장소가 소유한다. 모델·effort·활성 역할·개인 정의 경로는 gitignore된 `config.local.yaml`에서 관리한다. OMP나 pi의 설정 파일은 원본이 아니라 설치 결과물이다. 새로운 AI 클라이언트나 범용 오케스트레이션 엔진을 만드는 프로젝트는 아니다.
+에이전트 정의는 이 저장소가 소유한다. 모델·effort·활성 역할·개인 정의 경로는 gitignore된 `config.local.yaml`에서 관리한다. 실행은 **OMP의 네이티브 task** 또는 **기존 `nicobailon/pi-subagents` 플러그인**에 맡긴다. 자체 서브에이전트 실행기·스케줄러·플러그인을 만들거나 설치하지 않는다.
 
 ## AI에게 설치 맡기기
 
-사용하는 **OMP 또는 pi**에 다음 요청을 전달한다.
+사용하는 OMP 또는 pi에 다음 요청을 전달한다.
 
 ```text
 https://github.com/jaeryun/agent-config 를 내 환경에 설치해 줘.
-README.md와 INSTALL.md를 읽고 현재 클라이언트가 OMP인지 pi인지 확인해.
+README.md와 INSTALL.md를 읽고 현재 클라이언트와 설치된 플러그인을 확인해.
 기존 config.local.yaml이 있으면 사용하고, 없으면 예제를 바탕으로
 내 사용 가능 모델과 선택을 반영해 작성해 줘.
+pi라면 nicobailon/pi-subagents의 실제 버전과 정의 형식을 확인하고
+기존 플러그인에 적용해. 별도 실행기를 만들거나 다른 플러그인으로 대체하지 마.
 기존 지침·인증·무관한 설정을 보존하고 dry-run 후 설치해.
-새 세션의 지침·역할·도구 로딩을 확인하고, 실제 모델 호출 여부와
-요청한 모델·effort가 적용됐는지를 구분해서 보고해 줘.
-다른 모델이나 클라이언트로 임의 대체하지 마.
+새 세션의 실제 역할 목록과 모델·effort를 확인하고,
+모델 호출까지 확인했는지는 별도로 보고해 줘.
 ```
 
-설치 AI가 따를 전체 계약은 [INSTALL.md](INSTALL.md)에 있다. 지원 환경은 **OMP와 pi 두 가지뿐**이다. 다른 클라이언트를 추측해서 지원하거나 OMP 설치기를 pi 디렉터리에 실행하지 않는다.
+전체 절차는 [INSTALL.md](INSTALL.md)에 있다. 지원 범위는 OMP와 pi이며, **pi의 지원 플러그인은 npm 패키지 `pi-subagents`**다. `@tintinweb/pi-subagents`, 공식 subagent 예제 등 다른 동명 구현에 그대로 적용된다고 가정하지 않는다.
+
+## 왜 이 pi 플러그인인가
+
+pi는 서브에이전트 실행기를 기본 제공하지 않으며 공식 저장소에는 확장 예제가 있다. 공식 단일 표준이 지정되어 있다는 근거는 없다. 조사한 후보 중 `nicobailon/pi-subagents`는 [pi 공식 패키지 목록](https://pi.dev/packages/pi-subagents)에 등록되어 있고, 사용 지표와 기존 모델·thinking·작업자 관리 기능을 고려하면 이 프로젝트의 기본 지원 대상으로 타당하다. 비교 근거와 지표의 한계는 [REFERENCES.md](REFERENCES.md)에 기록한다.
+
+설치기가 받는 플러그인 버전 범위는 **0.79.x 중 0.79.1 이상**이다. 다른 버전을 자동 교체하지 않는다. 이전 자체 어댑터에서의 pi 0.73.1·1.3.0 테스트는 이 플러그인의 검증이 아니며, 현재 호환성 근거로 사용하지 않는다. 실제 확인한 조합과 범위는 [변경 이력](CHANGELOG.md)에 구분한다.
+
+현재 실제 실행 확인 조합은 **pi 1.3.0 + pi-subagents 0.79.1**, macOS arm64다. 다른 버전·OS는 이 검증에 포함하지 않았으며 사용자의 환경에서 별도 로딩·실행 확인이 필요하다.
 
 ## 에이전트 구성
 
 | 역할 | 책임 |
 |---|---|
-| `orchestrator` | 요청 이해, 직접 작업 또는 위임 판단, 작업 분배, 결과 통합, 최종 완료를 책임진다. |
+| `orchestrator` | 요청 이해, 직접 작업 또는 위임 판단, 결과 통합과 최종 완료를 책임진다. |
 | `task` | 기존 설계와 관례를 따르는 일반 구현을 조사부터 확인까지 담당한다. |
 | `sonic` | 규칙과 예외가 정해진 기계적 변경·자료 수집을 담당한다. |
 | `scout` | 위치를 모르는 코드와 자료를 읽기 전용으로 탐색한다. |
@@ -34,24 +43,21 @@ README.md와 INSTALL.md를 읽고 현재 클라이언트가 OMP인지 pi인지 �
 | `security-reviewer` | 인증·인가·secret·외부 입력 경계를 읽기 전용으로 검토한다. |
 | `image-analyst` | 원본 이미지를 관찰하고 텍스트 결과와 증거 경로만 반환한다. |
 
-메인은 조율만 하지 않는다. 작은 작업은 직접 처리하고, 위임은 불확실성·위험·독립성과 실제 이익을 기준으로 결정한다. 작업자는 재위임하지 않으며, 메인이 통합과 완료를 책임진다. 모든 작업에 전문가 팀이나 고정 리뷰 단계를 요구하지 않는다.
+메인은 조율만 하지 않는다. 작은 작업은 직접 처리하고, 위임은 불확실성·위험·독립성과 실제 이익을 기준으로 결정한다. 작업자는 재위임하지 않으며 메인이 통합과 완료를 책임진다. 모든 작업에 전문가 팀이나 고정 리뷰 단계를 요구하지 않는다.
 
 ## 원본과 개인 설정
 
 ```text
-agent/
-  AGENTS.md                  # 공통 메인 오케스트레이터 정의
-  agents/*.md                # 공통 서브에이전트 7개 정의
-  upstream/agency-agents/    # 이전 차용 원본·라이선스 기록; 설치하지 않음
+agent/AGENTS.md               # 공통 메인 오케스트레이터 정의
+agent/agents/*.md             # 공통 서브에이전트 7개 정의
 config.example.yaml          # 공개 설정 예제
 config.local.yaml            # 개인 모델·effort·정의 매핑; gitignore
 .local/                      # 개인 정의 파일; gitignore
-adapters/pi/index.ts         # pi의 별도 프로세스 위임 어댑터
-scripts/install.sh           # OMP/pi 설치 진입점
-INSTALL.md                   # AI용 설치·확인·원복 계약
+scripts/install.sh           # OMP/pi 설정 변환·설치 진입점
+INSTALL.md                   # AI용 설치·검증·원복 절차
 ```
 
-`config.example.yaml`을 `config.local.yaml`로 복사한 뒤 사용한다. 별도의 YAML을 `--config`로 지정할 수도 있다. 아래는 역할 한 개의 설정 예시이며 전체 설치에는 `orchestrator`와 필요한 작업자를 포함한다.
+전체 예제는 [`config.example.yaml`](config.example.yaml)이다. 개인 파일이 없을 때만 `config.local.yaml`로 복사한다.
 
 ```yaml
 version: 1
@@ -72,68 +78,74 @@ agents:
       pi: [read, bash, edit, write, grep, find, ls]
 ```
 
-- `definition`은 YAML 디렉터리 안의 상대 Markdown 경로다. 절대 경로, `..`, 디렉터리 밖을 가리키는 링크는 허용하지 않는다. 개인 역할을 추가하거나 `.local/`의 정의로 바꿀 수 있다. 클라이언트 전용 frontmatter는 원본에 넣지 않는다.
-- `model`은 `inherit` 또는 정확한 `provider/model-id`다. `effort`는 별도 필드이며 `inherit`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` 중에서 지원되는 값을 선택한다.
-- `model`·`effort`에는 `{omp: 값, pi: 값}`을 지정할 수 있다. provider ID나 지원 수준이 다를 때 사용한다.
-- 메인의 모델·effort는 둘 다 `inherit`로 유지하거나 둘 다 명시한다. 명시적 메인 설정은 새 세션의 시작값으로 적용하며, 실행 중인 세션을 강제로 바꾸지 않는다.
-- 작업자 모델의 `inherit`는 활성 메인 모델을 사용한다. **OMP 작업자의 effort는 명시해야 한다.** pi는 effort도 활성 메인에서 상속할 수 있다. 예제의 `medium`은 사용자 모델에 맞게 검토할 시작값이지 모든 모델의 지원 보장이 아니다.
-- API key·OAuth token은 YAML에 넣지 않는다. 각 클라이언트의 인증 저장소를 사용한다.
-- `config.local.yaml`과 `.local/`은 공개하지 않는다. 공통 정의와 설치 코드는 Git으로 관리한다. 설치 결과를 편집해도 원본 YAML로 역동기화되지는 않는다.
+- `definition`은 YAML 디렉터리 안의 상대 Markdown 경로다. 절대 경로, `..`, 바깥을 가리키는 링크는 허용하지 않는다. 개인 정의는 `.local/`에 둘 수 있다.
+- `model`은 `inherit` 또는 정확한 `provider/model-id`다. `effort`는 별도로 `inherit`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` 중 지원되는 값을 선택한다.
+- `model`·`effort`에 `{omp: 값, pi: 값}`을 지정하면 환경별 provider ID와 지원 수준을 구분할 수 있다.
+- 메인은 모델·effort를 둘 다 `inherit`로 유지하거나 둘 다 명시한다. 명시적 값은 새 세션의 시작값이다.
+- OMP 작업자의 effort는 명시해야 한다. pi의 `effort: inherit`는 `thinking`을 생략한다. 사용자 `subagents.defaultThinking`이 있으면 부모 effort 상속과 충돌하므로 설치를 거부하고 결정을 요구한다.
+- pi의 사용자 role override가 생성할 정의를 덮어쓰는 경우에도 자동 삭제하거나 무시하지 않고 중단한다. 기존 설정과 YAML을 먼저 조정한다. 프로젝트별 override와 실제 로딩값은 작업 디렉터리에서 확인해야 한다.
+- API key·OAuth token은 YAML에 넣지 않는다. 인증은 각 클라이언트가 관리한다. 개인 YAML과 `.local/`은 push하지 않는다.
 
-## 두 환경에서의 실행
+## 환경별 적용
 
-| 항목 | OMP | pi |
+| 항목 | OMP | pi + pi-subagents |
 |---|---|---|
-| 메인 지침 | 사용자 `AGENTS.md` 관리 구역 | 사용자 `AGENTS.md` 관리 구역 |
-| 작업자 정의 | `extensions/agent-config/agents/*.md`로 변환하고 확장 경로 등록 | 확장 옆 `config.json`으로 변환 |
-| 호출 | 네이티브 `task` | `agent_config_task` 확장 |
-| 실행 | OMP가 관리 | 같은 pi 실행 파일의 별도 프로세스 |
-| 후속 작업 | OMP의 작업자 통신·재개 기능 | 이전 결과를 전달하는 새 호출 |
-| 동시 실행 | `task.maxConcurrency` | 확장 전체의 동시 실행 제한 |
-| 작업자 effort | 명시적 설정 | 명시적 설정 또는 활성 부모 상속 |
+| 메인 지침 | `AGENTS.md` 관리 구역 | `AGENTS.md` 관리 구역 |
+| 작업자 정의 | `extensions/agent-config/agents/*.md` | `agents/*.md` |
+| 모델·effort | 네이티브 model selector·thinkingLevel | 플러그인의 `model`·`thinking` frontmatter |
+| 실행 도구 | `task` | `subagent` / 필요 시 `subagents_enable` |
+| 후속 작업 | OMP의 작업자 관리 기능 | 플러그인의 상태·steer·resume·supervisor 기능 |
+| 동시 실행 설정 | `task.maxConcurrency` | native run의 `globalConcurrencyLimit`·`parallel.concurrency` |
 
-실제 실행 확인 버전은 OMP 18.12.1, pi 0.73.1(`@mariozechner`)·1.3.0(`@earendil-works`)이다. macOS arm64에서 확인했으며 Linux·Windows와 다른 버전은 이번 실행 검증에 포함하지 않았다. 설치 AI는 사용자의 실제 버전에서 로딩과 실행을 확인해야 한다.
+pi의 `concurrency`는 **한 run 내부의 기본 제한**이다. 서로 독립된 여러 run을 포괄하는 새 전역 제한을 만들지 않으며, 네이티브 호출별 override까지 보안 경계로 차단한다고 주장하지 않는다. 플러그인의 다른 기능과 설정은 보존한다.
 
-pi는 서브에이전트를 기본 제공하지 않으므로 이 저장소가 필요한 위임 어댑터를 설치한다. 다른 서브에이전트 패키지를 임의로 선택하지 않는다. 작업자는 기본 도구만 사용하며 부모의 확장·skill·템플릿을 자동 상속하지 않는다. 따라서 OMP의 `agent://` 통신이나 부모의 브라우저 기능까지 동일하게 제공한다고 가정하지 않는다.
-
-**모델·effort 확인은 설치와 별개다.** pi 작업자 어댑터는 등록 모델과 지원 effort를 검사하고 요청한 모델과 다른 응답을 실패로 처리한다. OMP 18.12.1의 네이티브 런타임은 인증 실패 시 모델 fallback, 미지원 effort 조정을 할 수 있다. 두 클라이언트의 메인 시작 설정도 네이티브 capability 처리를 따르므로 실제 로딩값을 확인해야 한다. 설치기는 이러한 런타임 동작을 차단한다고 주장하지 않는다.
+pi 작업자는 새 문맥을 기본으로 하고 프로젝트 지침과 사용 가능한 skill을 읽는다. 전역 메인 지침은 상속하지 않으며 재위임은 금지한다. 확장 로딩·진행 표시·비동기 실행·출력 관리는 플러그인 계약을 따른다. 이미지 입력과 브라우저 기능은 선택 모델 및 실제 제공 도구의 능력을 확인해야 한다.
 
 ## 직접 설치하기
 
-Node.js 22 이상, npm과 대상 클라이언트가 필요하다. pi 자체가 더 높은 Node.js 최소 버전을 요구하면 그 조건도 충족해야 한다.
+Node.js 22 이상, npm과 대상 클라이언트가 필요하다. pi 자체가 요구하는 Node.js 최소 버전도 충족해야 한다.
 
 ```sh
-npm ci --ignore-scripts
+npm ci --omit=dev --ignore-scripts
+# config.local.yaml이 없는 경우에만 복사하고 개인 설정을 작성한다.
 cp config.example.yaml config.local.yaml
-# config.local.yaml을 자신의 모델·effort에 맞게 편집한다.
 
 ./scripts/install.sh --client omp --dry-run
 ./scripts/install.sh --client omp
-# pi 환경에서는 --client pi를 사용한다.
 ```
 
-기존 `config.local.yaml`이 있으면 복사 명령으로 덮어쓰지 않는다. 대상 경로는 `--agent-dir` > `PI_CODING_AGENT_DIR` > `~/.omp/agent` 또는 `~/.pi/agent` 순서다. `--client`는 필수다.
-
-- 기존 사용자 지침을 보존하며 이 저장소의 관리 구역만 갱신한다.
-- 관리하는 설정만 병합하고 인증 파일과 무관한 개인 설정은 건드리지 않는다.
-- 변경 파일의 비공개 백업과 설치 상태를 남기며, 재설치 시 동일한 결과물을 불필요하게 교체하지 않는다.
-- dry-run은 대상·설치 상태를 변경하지 않는다. 충돌하는 사용자 변경은 조용히 덮어쓰지 않는다.
-- 프롬프트·YAML을 바꾸면 다시 설치하고 새 세션을 연다. 설치 파일은 복사본이므로 checkout 변경이 자동으로 전역 지침을 바꾸지 않는다.
-
-제거와 원복은 같은 클라이언트·대상 경로에 `--uninstall`을 사용한다. 자세한 절차와 충돌 처리는 [설치 안내](INSTALL.md#갱신과-제거)를 따른다.
-
-## 이전 OMP 구성에서 전환
-
-기존 `agent/config.yml`의 개인 모델 배정은 `config.local.yaml`로 옮긴다. 공개 예제에는 작성자의 모델을 고정하지 않는다. 기존 설정의 `tiny`·`commit` 같은 클라이언트 보조 role은 이 저장소의 작업자 정의가 아니므로 새 설치기가 임의로 관리하지 않는다.
-
-이전 설치는 저장소 파일에 대한 심볼릭링크를 사용했다. 새 설치로 전환하기 전까지는 기존 링크가 남아 있으므로 소스 변경의 영향을 받을 수 있다. 새 설치기는 알려진 저장소 링크를 처리하되, 설치만으로 다른 사용자 소유 역할이나 규칙을 무조건 지우지 않는다. 실제 사용자 전역 환경의 마이그레이션은 별도 설치 실행이 필요하다.
-
-## 확인과 기록
+pi는 먼저 같은 프로필에 지원 플러그인이 설치되어 있어야 한다. 기존 호환 설치는 재사용한다.
 
 ```sh
+pi install npm:pi-subagents@0.79.1
+./scripts/install.sh --client pi --dry-run
+./scripts/install.sh --client pi
+```
+
+표준 npm 설치는 `<agent-dir>/npm/node_modules/pi-subagents`에서 확인한다. git/local 설치는 `--pi-subagents-dir /absolute/plugin/root`를 지정한다. 이 옵션은 **기존 플러그인을 확인하는 경로**이지 플러그인을 새로 로딩하는 옵션이 아니다. 실제 활성화는 pi 설정과 새 세션에서 확인한다.
+
+대상 경로는 `--agent-dir` > `PI_CODING_AGENT_DIR` > `~/.omp/agent` 또는 `~/.pi/agent` 순서다. `--client`는 필수다. 기존 지침과 무관한 설정을 보존하며, 관리 파일 충돌은 덮어쓰지 않는다. YAML·정의를 수정하면 재설치하고 새 세션을 연다.
+
+## 이전 설치에서 전환·제거
+
+이전 자체 pi 어댑터가 설치되어 있다면 같은 대상·설치 상태를 사용해 재설치한다. 설치기가 소유한 `extensions/agent-config/index.ts`와 `config.json`은 제거하고 플러그인 정의로 전환한다. 해당 파일이 변경됐거나 소유 기록이 없으면 임의로 삭제하지 않는다. **기존 pi-subagents 패키지는 교체·삭제하지 않는다.**
+
+```sh
+./scripts/install.sh --client pi --uninstall --dry-run
+./scripts/install.sh --client pi --uninstall
+```
+
+제거는 이 저장소의 정의와 관리한 설정만 대상으로 한다. 플러그인 자체는 유지한다. 상세 복구 절차는 [설치 안내](INSTALL.md#갱신과-제거)에 있다. 오래된 OMP 링크 설치도 새 설치 실행이 필요하며, 그 전에는 소스 변경의 영향을 받을 수 있다.
+
+## 검증과 출처
+
+```sh
+npm ci --ignore-scripts
 npm test
 ```
 
-설치기 회귀 검사는 임시 디렉터리에서 기존 지침·설정 보존, dry-run, 원복 충돌 등을 확인한다. 실제 클라이언트 검증과 provider 호출 여부는 [변경 이력](CHANGELOG.md)에 구분해서 기록한다. 지침 로딩만으로 모델의 작업 품질·정책 준수·비용 절감을 입증했다고 주장하지 않는다.
+개발 의존성은 실제 pi와 pi-subagents를 고정해 통합 검사에 사용한다. 제품 설치에는 포함할 필요가 없다. 회귀 검사는 설정·개인 지침 보존과 전환을 확인하고, 통합 검사는 실제 pi CLI에 실제 플러그인을 설치해 작업자 실행 경로를 확인한다. 로컬 endpoint 검증을 상용 모델의 답변 품질 평가로 설명하지 않는다.
 
-설계 근거와 차용 원본의 고지는 [참고 자료](REFERENCES.md)에 있다. `plans/`는 과거 완료 기록이며 현재 설치 안내를 대신하지 않는다. 원격 설정·commit·push는 설치 동작에 포함되지 않는다.
+[변경 이력](CHANGELOG.md) · [참고 자료와 차용 고지](REFERENCES.md)
+
+`agent/upstream/`과 `plans/`는 과거 자료이며 실행·설치 대상이 아니다. 원격 설정·commit·push는 설치기 동작에 포함되지 않는다.

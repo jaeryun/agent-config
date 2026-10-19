@@ -42,18 +42,19 @@ function options() {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') {
-      console.log('Usage: scripts/install.sh --client omp|pi [--config PATH] [--agent-dir PATH] [--dry-run] [--uninstall]\nNode >=22; run npm ci first. Config defaults to config.local.yaml (required for installation).\nTarget: --agent-dir, then PI_CODING_AGENT_DIR, then ~/.<client>/agent.');
+      console.log('Usage: scripts/install.sh --client omp|pi [--config PATH] [--agent-dir PATH] [--pi-subagents-dir PATH] [--dry-run] [--uninstall]\nNode >=22; run npm ci --omit=dev first. Config defaults to config.local.yaml (required for installation).\nPi workers require installed nicobailon/pi-subagents 0.79.x (>=0.79.1); no custom runner is installed.\nTarget: --agent-dir, then PI_CODING_AGENT_DIR, then ~/.<client>/agent.');
       process.exit(0);
     }
     if (arg === '--dry-run') result.dryRun = true;
     else if (arg === '--uninstall') result.uninstall = true;
-    else if (['--client', '--config', '--agent-dir'].includes(arg)) {
+    else if (['--client', '--config', '--agent-dir', '--pi-subagents-dir'].includes(arg)) {
       const value = args[++index];
       if (!value || value.startsWith('--')) fail(`${arg} requires a value`);
       result[arg === '--agent-dir' ? 'agentDir' : arg.slice(2)] = value;
     } else fail(`Unknown argument: ${arg}`);
   }
   if (!['omp', 'pi'].includes(result.client)) fail('--client omp|pi is required; the installer never guesses the client');
+  if (result['pi-subagents-dir'] && result.client !== 'pi') fail('--pi-subagents-dir is only valid with --client pi');
   result.agentDir = expand(result.agentDir ?? process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), `.${result.client}`, 'agent'));
   result.config = expand(result.config);
   return result;
@@ -130,8 +131,8 @@ function readConfig(file, client, target) {
       if (!Array.isArray(agent.tools[client])) fail(`${name}.tools.${client} is required`);
       tools = agent.tools[client];
       if (client === 'omp' && effort === 'inherit') fail(`${name}: OMP 18.12.1 cannot inherit a parent's live effort. Set effort.omp explicitly (off/minimal/low/medium/high/xhigh/max); effort.pi may remain inherit.`);
-      if (client === 'pi' && tools.some(tool => !['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'].includes(tool))) fail(`${name}: Pi tools must be native CLI tools (read,bash,edit,write,grep,find,ls)`);
-      if (tools.includes('task') || tools.includes('agent_config_task')) fail(`${name}: worker recursion is disabled; remove task tools`);
+      if (client === 'pi' && !tools.length) fail(`${name}: specify a nonempty Pi tool allowlist; an empty plugin field can inherit default tools`);
+      if (tools.some(tool => ['task', 'subagent', 'subagents_enable', 'agent_config_task'].includes(tool))) fail(`${name}: worker recursion is disabled; remove delegation tools`);
     }
     result.push({ name, description, prompt, model, effort, tools });
   }
@@ -178,6 +179,69 @@ function settingEditor(content, file) {
     output: () => doc.toString({ lineWidth: 0 }),
   };
 }
+
+function requirePiSubagents(target, explicit) {
+  const root = explicit ? expand(explicit) : path.join(target, 'npm/node_modules/pi-subagents');
+  const manifest = path.join(root, 'package.json');
+  if (!stat(manifest)) fail('Pi workers require nicobailon/pi-subagents. Run pi install npm:pi-subagents@0.79.1 in this profile first. For a git/local installation, pass --pi-subagents-dir PATH to its package root.');
+  const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  const version = /^0\.79\.(\d+)$/.exec(pkg.version ?? '');
+  if (pkg.name !== 'pi-subagents' || !version || Number(version[1]) < 1) fail(`Unsupported Pi plugin at ${root}: expected pi-subagents 0.79.x (>=0.79.1), found ${pkg.name ?? '(unknown)'} ${pkg.version ?? '(unknown)'}. Do not substitute a different subagent plugin.`);
+  console.log(`Pi plugin prerequisite: ${pkg.name}@${pkg.version} (${root}). Verify it is loaded in the target Pi session.`);
+}
+
+function checkPiOverrides(config, editor) {
+  const settings = editor.get(['subagents']);
+  if (!settings.exists) return;
+  const subagents = object(settings.value, 'subagents');
+  for (const agent of config.agents.filter(agent => agent.name !== 'orchestrator')) {
+    if (own(subagents.agentOverrides ?? {}, agent.name)) fail(`subagents.agentOverrides.${agent.name} would override the generated definition. Reconcile it with your local YAML before installing.`);
+    for (const [provider, overrides] of Object.entries(subagents.agentOverridesByProvider ?? {})) {
+      if (own(overrides, agent.name)) fail(`subagents.agentOverridesByProvider.${provider}.${agent.name} would override the generated definition. Reconcile it with your local YAML before installing.`);
+    }
+    if (agent.effort === 'inherit' && own(subagents, 'defaultThinking')) fail(`${agent.name}: effort=inherit conflicts with subagents.defaultThinking. Set an explicit local effort or resolve that plugin default; the installer will not silently replace it.`);
+  }
+}
+
+// Both the client settings and plugin settings use the same leaf-level ownership.
+function mergeSettings(editor, wanted, previous) {
+  const records = new Map((previous?.changes ?? []).map(record => [JSON.stringify(record.path), record]));
+  const changes = [];
+  const containers = [...(previous?.containers ?? [])];
+  let changed = false;
+  for (const record of records.values()) {
+    if (!isDeepStrictEqual(editor.get(record.path), record.installed)) fail(`Managed setting changed externally: ${record.path.join('.')}. Restore its installed value before reinstall/uninstall.`);
+  }
+  for (const entry of wanted) {
+    for (let length = 1; length < entry.path.length; length++) {
+      const prefix = entry.path.slice(0, length), slot = editor.get(prefix);
+      if (slot.exists) object(slot.value, `Settings ${prefix.join('.')}`);
+      else if (!containers.some(item => isDeepStrictEqual(item, prefix))) containers.push(prefix);
+    }
+    const id = JSON.stringify(entry.path);
+    const before = records.get(id)?.before ?? editor.get(entry.path);
+    if (!isDeepStrictEqual(editor.get(entry.path), entry.installed)) {
+      editor.set(entry.path, entry.installed);
+      changed = true;
+    }
+    records.delete(id);
+    changes.push({ ...entry, before });
+  }
+  for (const record of records.values()) {
+    if (!isDeepStrictEqual(editor.get(record.path), record.before)) {
+      editor.set(record.path, record.before);
+      changed = true;
+    }
+  }
+  for (const prefix of [...containers].sort((a, b) => b.length - a.length)) {
+    const slot = editor.get(prefix);
+    if (slot.exists && slot.value && typeof slot.value === 'object' && !Array.isArray(slot.value) && !Object.keys(slot.value).length) {
+      editor.set(prefix, missing);
+      changed = true;
+    }
+  }
+  return { changes, containers, changed };
+}
 function desiredSettings(client, config, editor) {
   const entries = [];
   const put = (parts, value) => entries.push({ path: parts, installed: { exists: true, value } });
@@ -222,7 +286,7 @@ function render(config, client) {
     ? 'No configured worker roles. This installation does not provide configured worker delegation.'
     : client === 'omp'
     ? `OMP transport: use the native task tool with context and tasks. Available configured roles: ${workers.map(agent => agent.name).join(', ')}. Child agents use OMP-native lifecycle, wait, and agent:// messaging. Pass relevant parent context explicitly.`
-    : `Pi transport: use agent_config_task with {context, tasks:[{agent, task}]}. Available configured roles: ${workers.map(agent => agent.name).join(', ')}. Calls block and run separate child processes with explicit context, not inherited conversation. No agent:// messaging, live steering, persistent child sessions, or nested delegation; follow-up is a new invocation carrying context. Workers can return blockers.`;
+    : `Pi transport: use the installed nicobailon/pi-subagents plugin's subagent tool. Available configured roles: ${workers.map(agent => agent.name).join(', ')}. If only subagents_enable is available, activate it first. Use {agent, task, options:{context:"fresh"}} for a single assignment; put shared instructions in task, not in context (which is a fresh/fork enum). Use the plugin's documented workflow API for parallel work. The native per-run concurrency default is ${config.concurrency}; do not override it without authorization. Reuse the plugin's status, steering, resume and supervisor facilities; do not spawn a separate runner or use OMP agent:// URLs.`;
   const block = `${BEGIN}\n${main.prompt}\n\n## Client capabilities\n\n${capability}\n${END}`;
   if (client === 'omp') {
     for (const agent of workers) {
@@ -231,9 +295,17 @@ function render(config, client) {
       if (agent.model !== 'inherit') frontmatter.model = `${agent.model}:${agent.effort}`;
       files[`extensions/agent-config/agents/${agent.name}.md`] = `---\n${YAML.stringify(frontmatter, { lineWidth: 0 })}---\n\n${agent.prompt}\n\n## OMP transport\n\nUse native OMP communication and completion tools supplied by the parent runtime. Do not spawn further workers. Relevant context is supplied in the assignment; report concrete blockers to the parent.\n`;
     }
-  } else if (workers.length) {
-    files['extensions/agent-config/index.ts'] = fs.readFileSync(path.join(repo, 'adapters/pi/index.ts'), 'utf8');
-    files['extensions/agent-config/config.json'] = JSON.stringify({ version: 1, concurrency: config.concurrency, agents: workers.map(agent => ({ ...agent, model: agent.model === 'inherit' ? null : agent.model, effort: agent.effort === 'inherit' ? null : agent.effort })) }, null, 2) + '\n';
+  } else {
+    for (const agent of workers) {
+      const frontmatter = {
+        name: agent.name, description: agent.description, advertise: true,
+        model: agent.model, tools: agent.tools.join(', '), systemPromptMode: 'append',
+        inheritProjectContext: true, inheritGlobalContext: false, inheritSkills: true,
+        defaultContext: 'fresh', allowNestedSubagents: false,
+      };
+      if (agent.effort !== 'inherit') frontmatter.thinking = agent.effort;
+      files[`agents/${agent.name}.md`] = `---\n${YAML.stringify(frontmatter, { lineWidth: 0 })}---\n\n${agent.prompt}\n\n## Pi subagent boundary\n\nYou are this assigned worker, not the parent orchestrator. Use the existing pi-subagents runtime for results and available supervisor communication. Do not delegate or launch another AI client. Return evidence and blockers through the native result channel.\n`;
+    }
   }
   return { files, block };
 }
@@ -255,6 +327,8 @@ function main() {
     if (opt.uninstall && !old) { console.log(`No managed installation for ${target}`); return; }
     const config = opt.uninstall ? null : readConfig(opt.config, opt.client, target);
     if (config && inside(canonical(opt.config), target)) fail('Install target must not contain the source configuration');
+    const piWorkers = opt.client === 'pi' && config?.agents.some(agent => agent.name !== 'orchestrator');
+    if (piWorkers) requirePiSubagents(target, opt['pi-subagents-dir']);
     const desired = config ? render(config, opt.client) : { files: {}, block: null };
     const next = { version: 1, client: opt.client, target, files: {}, agents: null, settings: null };
     const plans = [];
@@ -350,6 +424,7 @@ function main() {
     }
     const editor = settingEditor(settingsText, settingsRelative);
     let settingsChanged = settingsCurrent?.link !== undefined;
+    if (piWorkers) checkPiOverrides(config, editor);
     // OMP's task-agent user lookup ignores PI_CODING_AGENT_DIR in 18.12.1.
     // A dedicated configured package root is supported by native discovery.
     // Own only its array membership, never the user's complete extension list.
@@ -380,40 +455,8 @@ function main() {
       }
     }
     const wanted = config ? desiredSettings(opt.client, config, editor) : [];
-    const records = new Map((old?.settings?.changes ?? []).map(record => [JSON.stringify(record.path), record]));
-    const changes = [];
-    const containers = old?.settings?.containers ?? [];
-    for (const record of records.values()) {
-      if (!isDeepStrictEqual(editor.get(record.path), record.installed)) fail(`Managed setting changed externally: ${settingsRelative}:${record.path.join('.')}. Restore its installed value before reinstall/uninstall.`);
-    }
-    for (const entry of wanted) {
-      for (let length = 1; length < entry.path.length; length++) {
-        const prefix = entry.path.slice(0, length), slot = editor.get(prefix);
-        if (slot.exists) object(slot.value, `Settings ${prefix.join('.')}`);
-        else if (!containers.some(item => isDeepStrictEqual(item, prefix))) containers.push(prefix);
-      }
-      const id = JSON.stringify(entry.path);
-      const before = records.get(id)?.before ?? editor.get(entry.path);
-      if (!isDeepStrictEqual(editor.get(entry.path), entry.installed)) {
-        editor.set(entry.path, entry.installed);
-        settingsChanged = true;
-      }
-      records.delete(id);
-      changes.push({ ...entry, before });
-    }
-    for (const record of records.values()) {
-      if (!isDeepStrictEqual(editor.get(record.path), record.before)) {
-        editor.set(record.path, record.before);
-        settingsChanged = true;
-      }
-    }
-    for (const prefix of [...containers].sort((a, b) => b.length - a.length)) {
-      const slot = editor.get(prefix);
-      if (slot.exists && slot.value && typeof slot.value === 'object' && !Array.isArray(slot.value) && !Object.keys(slot.value).length) {
-        editor.set(prefix, missing);
-        settingsChanged = true;
-      }
-    }
+    const { changes, containers, changed } = mergeSettings(editor, wanted, old?.settings);
+    settingsChanged ||= changed;
     const settingsOutput = editor.output();
     const existed = old?.settings?.existed ?? Boolean(settingsCurrent);
     if (settingsChanged) {
@@ -421,11 +464,31 @@ function main() {
       plan(settingsRelative, !config && !existed && empty ? null : { content: settingsOutput, mode: settingsCurrent?.mode ?? 0o600 });
     }
     if (config) next.settings = { file: settingsRelative, existed, changes, containers, extensionRoot };
+    if (piWorkers || old?.pluginSettings) {
+      const relative = 'extensions/subagent/config.json';
+      const destination = path.join(target, relative);
+      safeParents(destination, target);
+      const current = snapshot(destination);
+      if (current?.link !== undefined) fail(`Refusing redirected Pi plugin settings: ${destination}`);
+      const pluginEditor = settingEditor(current?.content ?? '', relative);
+      const pluginWanted = piWorkers ? [
+        { path: ['globalConcurrencyLimit'], installed: { exists: true, value: config.concurrency } },
+        { path: ['parallel', 'concurrency'], installed: { exists: true, value: config.concurrency } },
+      ] : [];
+      const merged = mergeSettings(pluginEditor, pluginWanted, old?.pluginSettings);
+      const existed = old?.pluginSettings?.existed ?? Boolean(current);
+      if (merged.changed) {
+        const empty = !Object.keys(pluginEditor.get([]).value).length;
+        plan(relative, !piWorkers && !existed && empty ? null : { content: pluginEditor.output(), mode: current?.mode ?? 0o600 });
+      }
+      if (piWorkers) next.pluginSettings = { existed, changes: merged.changes, containers: merged.containers };
+    }
     if (config) {
       console.log(`Requested ${opt.client} mapping (no installer substitution):`);
       for (const agent of config.agents) console.log(`  ${agent.name}: model=${agent.model}; effort=${agent.effort}${agent.name === 'orchestrator' ? '' : `; tools=${agent.tools.join(',') || '(none)'}`}`);
       if (opt.client === 'omp') console.warn('WARNING: OMP native runtime may auth-fallback or clamp unsupported effort. Installation renders requested selectors only. Verify available model/auth and actual resolved worker model/effort; any mismatch is a failed runtime acceptance check.');
       if (config.agents.find(agent => agent.name === 'orchestrator').model !== 'inherit') console.warn(`WARNING: Explicit ${opt.client} startup model/effort requires native capability and actual loaded-value verification. A native fallback, clamp, or ignored startup value is a failed acceptance check, not a successful configuration.`);
+      if (piWorkers) console.warn('Pi definitions are installed for pi-subagents, not executed by this repository. Verify /subagents-models and /subagents-doctor in a new session; project definitions/settings and native effort handling may change effective values.');
     }
     const manifestText = JSON.stringify(next, null, 2) + '\n';
     const oldManifestText = old ? fs.readFileSync(manifestFile, 'utf8') : null;
