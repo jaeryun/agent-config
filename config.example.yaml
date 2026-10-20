@@ -1,4 +1,8 @@
 # Copy only when config.local.yaml does not exist. Private YAML/.local are ignored.
+# Structure example, NOT a recommended model/effort assignment or ready-to-install preset.
+# Before applying, follow INSTALL.md: inspect the target client's registered models,
+# compare role candidates, interview the user, and agree on every assignment.
+# Existing private choices stay unchanged unless the user agrees to replace them.
 # OMP built-in names keep their native definitions; definition/tools.pi port them to pi.
 # native/native preserves OMP routing and effort, not active-parent inheritance.
 # Explicit provider/model + effort pins a worker without replacing its native prompt.
@@ -39,6 +43,7 @@ agents:
   deep:
     description: Resolve ambiguous bugs and design-sensitive implementation end to end.
     definition: agent/agents/deep.md
+    # Draft only: agree on a capable model and its supported effort during the interview.
     model: inherit
     effort: {omp: medium, pi: inherit}
     tools:
@@ -63,8 +68,9 @@ agents:
   image-analyst:
     description: Low-cost vision worker for image-heavy tasks, visual inspection, and non-vision model assistance using available tools.
     definition: agent/agents/image-analyst.md
-    # Set an available lower-cost image-capable model before using cost-offload.
-    # inherit is a neutral bootstrap choice, not a promise of cheaper or vision-capable execution.
+    # Agree on an available image-capable model and supported effort before applying.
+    # Compare actual provider/plan costs; inherit/medium do not establish suitability.
+    # If no low-cost vision candidate exists, ask about an alternative or defer this role.
     model: inherit
     effort: {omp: medium, pi: inherit}
     tools:
