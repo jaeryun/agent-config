@@ -13,6 +13,7 @@ const repo = fs.realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta
 const BEGIN = '<!-- agent-config:begin -->';
 const END = '<!-- agent-config:end -->';
 const missing = { exists: false };
+const OMP_BUILTINS = new Set(['task', 'sonic', 'scout', 'reviewer', 'security-reviewer', 'seance']);
 const fail = message => { throw new Error(message); };
 const own = (object, key) => Object.hasOwn(object, key);
 const inside = (child, parent) => child === parent || child.startsWith(parent + path.sep);
@@ -92,18 +93,20 @@ function readConfig(file, client, target) {
   if (!stat(file)) fail(`Configuration is required: ${file}. Create your private YAML from config.example.yaml; no example is installed automatically.`);
   const config = yamlDocument(fs.readFileSync(file, 'utf8'), file).toJS({ maxAliasCount: 0 });
   fields(config, ['version', 'concurrency', 'agents'], 'config');
-  if (config.version !== 1) fail('config.version must be 1');
+  if (config.version !== 2) fail('config.version must be 2. Migrate v1 using INSTALL.md: remove tools.omp/spawns.omp for OMP builtins and use native/native or an explicit model/effort pair. The installer never rewrites your source YAML.');
   if (!Number.isSafeInteger(config.concurrency) || config.concurrency < 1) fail('config.concurrency must be a positive integer');
   object(config.agents, 'config.agents');
   if (!own(config.agents, 'orchestrator')) fail('config.agents.orchestrator is required');
+  const base = fs.realpathSync(path.dirname(file));
   const result = [];
   for (const [name, agent] of Object.entries(config.agents)) {
     if (!/^[a-z][a-z0-9-]*$/.test(name) || ['main', 'sub', '__proto__', 'constructor', 'prototype'].includes(name)) fail(`Unsafe agent name: ${name}`);
-    fields(agent, ['description', 'definition', 'model', 'effort', 'tools'], `agents.${name}`);
+    fields(agent, ['description', 'definition', 'model', 'effort', 'tools', 'spawns', 'extensions'], `agents.${name}`);
+    const native = client === 'omp' && OMP_BUILTINS.has(name);
+    if (client === 'pi' && name === 'seance') fail('seance requires the native OMP historical-session runtime and has no pi port; omit it from a configuration used for pi.');
     const description = text(agent.description, `${name}.description`);
     const definition = text(agent.definition, `${name}.definition`);
     if (path.isAbsolute(definition) || definition.split(/[\\/]/).includes('..')) fail(`${name}.definition must be a contained relative path without '..'`);
-    const base = fs.realpathSync(path.dirname(file));
     const source = fs.realpathSync(path.resolve(base, definition));
     if (!inside(source, base) || inside(source, target)) fail(`Definition escapes config directory or overlaps target: ${definition}`);
     const prompt = fs.readFileSync(source, 'utf8').trim();
@@ -117,24 +120,61 @@ function readConfig(file, client, target) {
     };
     const model = select('model');
     const effort = select('effort');
-    if (model !== 'inherit' && (!/^[a-zA-Z0-9_-]+\/[^\s,]+$/.test(model) || /[*?\[\]@]/.test(model) || /:(inherit|off|minimal|low|medium|high|xhigh|max|auto)$/.test(model))) fail(`${name}.model must be inherit or an exact provider/model-id without an effort suffix, alias, or glob`);
-    if (!['inherit', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) fail(`Unsupported ${name}.effort: ${effort}`);
-    if (name === 'orchestrator' && ((model === 'inherit') !== (effort === 'inherit'))) fail('Orchestrator model and effort must both inherit or both be explicit');
-    let tools = [];
-    if (name === 'orchestrator') {
-      if (own(agent, 'tools')) fail('orchestrator.tools is unsupported; tools mappings are worker-only');
-    } else {
-      fields(agent.tools, ['omp', 'pi'], `${name}.tools`);
-      for (const [toolClient, names] of Object.entries(agent.tools)) {
-        if (!Array.isArray(names) || names.some(item => typeof item !== 'string' || !/^[a-z][a-z0-9_-]*$/.test(item)) || new Set(names).size !== names.length) fail(`${name}.tools.${toolClient} must be an array of distinct tool names`);
+    const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+    if (native) {
+      if (!(model === 'native' && effort === 'native') &&
+        (['native', 'inherit'].includes(model) || !levels.includes(effort))) {
+        fail(`${name}: OMP builtin model/effort must both be native (preserve native routing) or both explicit. inherit does not preserve the native role contract.`);
       }
-      if (!Array.isArray(agent.tools[client])) fail(`${name}.tools.${client} is required`);
-      tools = agent.tools[client];
-      if (client === 'omp' && effort === 'inherit') fail(`${name}: OMP 18.12.1 cannot inherit a parent's live effort. Set effort.omp explicitly (off/minimal/low/medium/high/xhigh/max); effort.pi may remain inherit.`);
-      if (client === 'pi' && !tools.length) fail(`${name}: specify a nonempty Pi tool allowlist; an empty plugin field can inherit default tools`);
-      if (tools.some(tool => ['task', 'subagent', 'subagents_enable', 'agent_config_task'].includes(tool))) fail(`${name}: worker recursion is disabled; remove delegation tools`);
+    } else if (model === 'native' || effort === 'native') {
+      fail(`${name}: native is only supported for OMP builtins`);
     }
-    result.push({ name, description, prompt, model, effort, tools });
+    if (!['inherit', 'native'].includes(model) &&
+      (!/^[a-zA-Z0-9_-]+\/[^\s,]+$/.test(model) || /[*?\[\]@]/.test(model) || /:(inherit|off|minimal|low|medium|high|xhigh|max|auto)$/.test(model))) {
+      fail(`${name}.model must be an exact provider/model-id without an effort suffix, alias, or glob`);
+    }
+    if (![...levels, 'inherit', 'native'].includes(effort)) fail(`Unsupported ${name}.effort: ${effort}`);
+    if (name === 'orchestrator' && ((model === 'inherit') !== (effort === 'inherit'))) fail('Orchestrator model and effort must both inherit or both be explicit');
+    const toolMap = agent.tools ?? {};
+    const spawnMap = agent.spawns ?? {};
+    const extensionMap = agent.extensions ?? {};
+    fields(toolMap, ['omp', 'pi'], `${name}.tools`);
+    fields(spawnMap, ['omp', 'pi'], `${name}.spawns`);
+    fields(extensionMap, ['pi'], `${name}.extensions`);
+    if (OMP_BUILTINS.has(name) && (own(toolMap, 'omp') || own(spawnMap, 'omp'))) {
+      fail(`${name}: tools.omp/spawns.omp cannot override an OMP builtin. Its definition, tools, output and spawn policy remain native; configure only the pi mapping.`);
+    }
+    for (const [toolClient, names] of Object.entries(toolMap)) {
+      const valid = toolClient === 'pi' ? /^[a-z][a-z0-9_:/.-]*$/ : /^[a-z][a-z0-9_-]*$/;
+      if (!Array.isArray(names) || names.some(item => typeof item !== 'string' || !valid.test(item)) || new Set(names).size !== names.length) fail(`${name}.tools.${toolClient} must be an array of distinct tool names`);
+    }
+    for (const [spawnClient, names] of Object.entries(spawnMap)) {
+      if (names !== '*' && (!Array.isArray(names) || names.some(item => typeof item !== 'string' || !/^[a-z][a-z0-9-]*$/.test(item)) || new Set(names).size !== names.length)) {
+        fail(`${name}.spawns.${spawnClient} must be '*' or an array of distinct agent names`);
+      }
+    }
+    let tools = [], spawns = spawnMap[client] ?? [], extensions;
+    if (name === 'orchestrator') {
+      if (['tools', 'spawns', 'extensions'].some(key => own(agent, key))) fail('orchestrator tools/spawns/extensions are unsupported; these are worker-only mappings');
+    } else if (!native) {
+      if (!Array.isArray(toolMap[client])) fail(`${name}.tools.${client} is required`);
+      tools = toolMap[client];
+      if (client === 'omp' && effort === 'inherit') fail(`${name}: custom OMP workers require explicit effort; live parent effort inheritance is unavailable`);
+      if (client === 'pi' && !tools.length) fail(`${name}: specify a nonempty Pi tool allowlist; an empty plugin field can inherit default tools`);
+      if (tools.some(tool => ['task', 'subagent', 'subagents_enable', 'agent_config_task'].includes(tool)) && spawns !== '*' && !spawns.length) {
+        fail(`${name}: delegation tools require an explicit spawns grant`);
+      }
+    }
+    if (own(extensionMap, 'pi')) {
+      if (!Array.isArray(extensionMap.pi) || extensionMap.pi.some(item => typeof item !== 'string' || !item.trim())) fail(`${name}.extensions.pi must be an array of paths`);
+      if (client === 'pi') extensions = extensionMap.pi.map(item => {
+        const absolute = item.startsWith('~') ? expand(item) : path.resolve(base, item);
+        const resolved = fs.realpathSync(absolute);
+        if (!fs.statSync(resolved).isFile() && !fs.statSync(resolved).isDirectory()) fail(`Invalid Pi extension path: ${item}`);
+        return resolved;
+      });
+    }
+    result.push({ name, description, prompt, model, effort, tools, spawns, extensions, native });
   }
   return { concurrency: config.concurrency, agents: result };
 }
@@ -249,16 +289,12 @@ function desiredSettings(client, config, editor) {
   const main = config.agents.find(agent => agent.name === 'orchestrator');
   if (client === 'omp') {
     put(['task', 'maxConcurrency'], config.concurrency);
-    put(['task', 'maxRecursionDepth'], 1);
-    put(['task', 'enableEffort'], false);
-    put(['task', 'batch'], true);
-    put(['async', 'enabled'], true);
-    if (config.agents.some(agent => agent.tools.includes('lsp'))) put(['task', 'enableLsp'], true);
-    const names = config.agents.filter(agent => agent.name !== 'orchestrator').map(agent => agent.name);
-    for (const name of names) {
-      remove(['task', 'agentModelOverrides', name]);
-      put(['task', 'agentPrewalk', name], 'off');
-      put(['task', 'agentAdvisor', name], 'off');
+    const workers = config.agents.filter(agent => agent.name !== 'orchestrator');
+    const names = workers.map(agent => agent.name);
+    for (const agent of workers) {
+      if (agent.native && agent.model === 'native') continue;
+      if (agent.model === 'inherit') remove(['task', 'agentModelOverrides', agent.name]);
+      else put(['task', 'agentModelOverrides', agent.name], `${agent.model}:${agent.effort}`);
     }
     const disabled = editor.get(['task', 'disabledAgents']);
     if (disabled.exists) {
@@ -282,29 +318,38 @@ function render(config, client) {
   const files = {};
   const workers = config.agents.filter(agent => agent.name !== 'orchestrator');
   const main = config.agents.find(agent => agent.name === 'orchestrator');
-  const capability = !workers.length
-    ? 'No configured worker roles. This installation does not provide configured worker delegation.'
-    : client === 'omp'
-    ? `OMP transport: use the native task tool with context and tasks. Available configured roles: ${workers.map(agent => agent.name).join(', ')}. Child agents use OMP-native lifecycle, wait, and agent:// messaging. Pass relevant parent context explicitly.`
-    : `Pi transport: use the installed nicobailon/pi-subagents plugin's subagent tool. Available configured roles: ${workers.map(agent => agent.name).join(', ')}. If only subagents_enable is available, activate it first. Use {agent, task, options:{context:"fresh"}} for a single assignment; put shared instructions in task, not in context (which is a fresh/fork enum). Use the plugin's documented workflow API for parallel work. The native per-run concurrency default is ${config.concurrency}; do not override it without authorization. Reuse the plugin's status, steering, resume and supervisor facilities; do not spawn a separate runner or use OMP agent:// URLs.`;
+  const capability = client === 'omp'
+    ? `OMP transport: use native task/eval schemas and role permissions as exposed by the runtime; do not assume a particular batch mode or recursion limit. Builtin names retain OMP's own definitions, tools and output contracts. Configured roles: ${workers.map(agent => `${agent.name}${agent.native ? ' (native)' : ' (custom)'}`).join(', ') || '(none managed)'}. Other native roles, including seance, are not disabled. Models marked native retain existing OMP routing, not necessarily the active parent model.`
+    : workers.length
+      ? `Pi transport: use the existing nicobailon/pi-subagents subagent tool. Configured roles: ${workers.map(agent => `${agent.name}: ${agent.description}`).join('; ')}. If only subagents_enable is available, activate it first. Use {agent, task, options:{context:"fresh"}} for a single assignment; shared instructions belong in task, not the context enum. Use native workflow/status/steer/resume/supervisor facilities. Nested delegation follows each role's grant and native limits. Per-run concurrency default: ${config.concurrency}. There is no pi seance equivalent or OMP agent:// transport.`
+      : 'No repository-managed worker roles. Existing plugin/user roles are not disabled; discover the actual runtime inventory before delegating.';
   const block = `${BEGIN}\n${main.prompt}\n\n## Client capabilities\n\n${capability}\n${END}`;
   if (client === 'omp') {
-    for (const agent of workers) {
-      const frontmatter = { name: agent.name, description: agent.description, tools: agent.tools, spawns: [], prewalk: false, advisor: false, thinkingLevel: agent.effort };
-      // No model field means the active parent model, not a role/default selector.
+    for (const agent of workers.filter(agent => !agent.native)) {
+      const frontmatter = { name: agent.name, description: agent.description, tools: agent.tools, spawns: agent.spawns, thinkingLevel: agent.effort };
       if (agent.model !== 'inherit') frontmatter.model = `${agent.model}:${agent.effort}`;
-      files[`extensions/agent-config/agents/${agent.name}.md`] = `---\n${YAML.stringify(frontmatter, { lineWidth: 0 })}---\n\n${agent.prompt}\n\n## OMP transport\n\nUse native OMP communication and completion tools supplied by the parent runtime. Do not spawn further workers. Relevant context is supplied in the assignment; report concrete blockers to the parent.\n`;
+      files[`extensions/agent-config/agents/${agent.name}.md`] = `---\n${YAML.stringify(frontmatter, { lineWidth: 0 })}---\n\n${agent.prompt}\n\n## OMP transport\n\nUse native OMP communication and completion tools. Delegation follows this role's configured spawn grant and the native runtime limits. Relevant context is supplied in the assignment; report concrete blockers to the parent.\n`;
     }
   } else {
     for (const agent of workers) {
+      const nesting = agent.spawns === '*' || agent.spawns.length > 0;
+      // The plugin needs both the nesting grant and subagent in an explicit tool allowlist.
+      const tools = nesting && !agent.tools.includes('subagent') ? [...agent.tools, 'subagent'] : agent.tools;
       const frontmatter = {
         name: agent.name, description: agent.description, advertise: true,
-        model: agent.model, tools: agent.tools.join(', '), systemPromptMode: 'append',
+        model: agent.model, tools: tools.join(', '), systemPromptMode: 'append',
         inheritProjectContext: true, inheritGlobalContext: false, inheritSkills: true,
-        defaultContext: 'fresh', allowNestedSubagents: false,
+        defaultContext: 'fresh', allowNestedSubagents: nesting,
       };
+      if (Array.isArray(agent.spawns) && agent.spawns.length) frontmatter.allowedAgents = agent.spawns.join(', ');
       if (agent.effort !== 'inherit') frontmatter.thinking = agent.effort;
-      files[`agents/${agent.name}.md`] = `---\n${YAML.stringify(frontmatter, { lineWidth: 0 })}---\n\n${agent.prompt}\n\n## Pi subagent boundary\n\nYou are this assigned worker, not the parent orchestrator. Use the existing pi-subagents runtime for results and available supervisor communication. Do not delegate or launch another AI client. Return evidence and blockers through the native result channel.\n`;
+      if (agent.extensions?.length) frontmatter.extensions = agent.extensions;
+      // The plugin's scalar-list parser treats a YAML inline [] as a literal name.
+      const emptyExtensions = agent.extensions?.length === 0 ? 'extensions:\n' : '';
+      files[`agents/${agent.name}.md`] = `---\n${YAML.stringify(frontmatter, { lineWidth: 0 })}${emptyExtensions}---\n\n${agent.prompt}\n\n## Pi runtime\n\nYou are the assigned role, not the parent orchestrator. Use the existing plugin's native result and supervisor channels. Any delegation must follow this role's configured grant and the runtime limits. Do not launch a substitute AI client. Return evidence and blockers through the native result channel.\n`;
+    }
+    if (workers.some(agent => OMP_BUILTINS.has(agent.name))) {
+      files['agents/agent-config-OMP-LICENSE.txt'] = fs.readFileSync(path.join(repo, 'agent/upstream/oh-my-pi/LICENSE'), 'utf8');
     }
   }
   return { files, block };
@@ -430,7 +475,7 @@ function main() {
     // Own only its array membership, never the user's complete extension list.
     let extensionRoot = null;
     const previousRoot = old?.settings?.extensionRoot;
-    const needsRoot = opt.client === 'omp' && config?.agents.some(agent => agent.name !== 'orchestrator');
+    const needsRoot = opt.client === 'omp' && config?.agents.some(agent => agent.name !== 'orchestrator' && !agent.native);
     if (previousRoot || needsRoot) {
       const slot = editor.get(['extensions']);
       if (slot.exists && (!Array.isArray(slot.value) || slot.value.some(value => typeof value !== 'string'))) fail('OMP extensions must be an array of paths');
@@ -485,7 +530,7 @@ function main() {
     }
     if (config) {
       console.log(`Requested ${opt.client} mapping (no installer substitution):`);
-      for (const agent of config.agents) console.log(`  ${agent.name}: model=${agent.model}; effort=${agent.effort}${agent.name === 'orchestrator' ? '' : `; tools=${agent.tools.join(',') || '(none)'}`}`);
+      for (const agent of config.agents) console.log(`  ${agent.name}: model=${agent.model}; effort=${agent.effort}${agent.name === 'orchestrator' ? '' : `; tools=${agent.native ? '(OMP native)' : agent.tools.join(',') || '(none)'}`}`);
       if (opt.client === 'omp') console.warn('WARNING: OMP native runtime may auth-fallback or clamp unsupported effort. Installation renders requested selectors only. Verify available model/auth and actual resolved worker model/effort; any mismatch is a failed runtime acceptance check.');
       if (config.agents.find(agent => agent.name === 'orchestrator').model !== 'inherit') console.warn(`WARNING: Explicit ${opt.client} startup model/effort requires native capability and actual loaded-value verification. A native fallback, clamp, or ignored startup value is a failed acceptance check, not a successful configuration.`);
       if (piWorkers) console.warn('Pi definitions are installed for pi-subagents, not executed by this repository. Verify /subagents-models and /subagents-doctor in a new session; project definitions/settings and native effort handling may change effective values.');

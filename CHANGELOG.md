@@ -1,5 +1,25 @@
 # 변경 이력
 
+## 2026-10-20 · OMP 내장 보존, pi 역할 이식, 저가 비전 작업자
+
+### 변경
+
+- OMP의 내장 task/sonic/scout/reviewer/security-reviewer를 덮어쓰던 파일 생성을 중단했다. 기존 manifest가 관리한 동명 파일을 제거하고 강제했던 batch/async/재귀/effort/advisor/prewalk/LSP 설정을 기록된 이전 값으로 복구한다. native seance와 다른 사용자 역할을 비활성화하지 않는다.
+- YAML v2에서 OMP 내장 `native`/`native`는 기존 routing을 보존하고, 명시적 model/effort는 네이티브 override에 연결한다. custom 역할의 부모 상속과 구분했다. 기존 개인 모델·effort 배정은 비공개 백업 후 전부 유지했다.
+- pi 일반 역할 5개를 OMP 18.12.1의 실제 계약을 기준으로 보강했다. 내장 source와 MIT 고지를 보존하며, OMP 전용 yield/schema는 pi의 의미 있는 텍스트 결과로 바꿨다. task의 위임과 reviewer의 scout 위임을 native 권한으로 연결한다.
+- deep과 image-analyst는 추가 역할로 유지했다. image-analyst는 이미지 미지원 메인 보완 및 이미지·화면 처리량이 많은 과업의 비용 분리를 위한 저가 비전 작업자다. 특정 도구를 필수로 하거나 모든 이미지 처리를 전담시키지 않는다.
+- pi 자식용 기존 extension 경로를 선언할 수 있게 했다. 필요 도구·provider의 실제 로딩을 확인하며, 이 저장소가 새로운 browser/QA 실행기를 제공하지 않는다.
+
+### 실행 확인
+
+- `npm test`: **26개 통과**. 설치·원복·v1 거부·native routing 보존·이전 managed 대체 파일 제거·무관한 account/tier 정책 보존과 실제 pi/plugin 통합을 포함한다.
+- 실제 OMP 18.12.1의 task/scout/reviewer 결과 출처가 `bundled`였고, 명시 모델·effort로 파일을 읽어 결과를 반환했다. batch=false, enableEffort=true, maxRecursionDepth=3, async=false인 기존 profile 설정이 설치 후에도 유지됐다.
+- 별도 OMP smoke에서 `native` task가 부모의 main/medium 대신 기존 role routing의 task/low를 사용함을 확인했다. 추가 image-analyst는 `user` 출처의 별도 vision/low 모델로 이미지 입력을 받아 텍스트 결과를 반환했다.
+- 실제 pi 1.3.0 + pi-subagents 0.79.1에서 task의 재위임 도구, reviewer의 허용된 scout 실행과 금지된 task 실행 차단을 확인했다. 통합 중 explicit tools allowlist에 native subagent 도구도 필요함을 발견해 spawn grant 변환에 반영했다.
+- 실제 pi image-analyst가 별도 vision/low 모델에서 이미지 입력을 받았고, 이미지 지원 부모에게 원본이 재주입되지 않는 것을 확인했다. 자식 extension 초기화/필수 도구 실패는 다른 모델로 우회하지 않고 실패했다.
+- 검증 환경은 macOS arm64와 격리된 임시 디렉터리, 로컬 OpenAI-compatible endpoint다. 실제 클라이언트·plugin·도구·이미지 전송을 사용했지만 모델 응답은 결정적 검증용 응답이다. 상용 모델의 이미지 판단 품질·자율 위임 판단·비용 절감률을 측정한 것은 아니다. 사용자 전역 재설치는 수행하지 않았다.
+
+
 ## 2026-10-19 · 기존 pi-subagents로 전환
 
 ### 수정

@@ -27,7 +27,8 @@ function run(binary, args, cwd, env) {
   });
 }
 
-test('real pi-subagents loads installed roles and executes native workers with selected model and thinking', { timeout: 60000 }, async t => {
+for (const scenario of ['roles', 'reviewer-grant', 'vision', 'broken-extension']) {
+test(`real pi-subagents preserves native behavior: ${scenario}`, { timeout: 60000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'agent-config-native-pi-'));
   const target = join(root, 'agent');
   const workspace = join(root, 'workspace');
@@ -36,6 +37,11 @@ test('real pi-subagents loads installed roles and executes native workers with s
   t.after(() => rm(root, { recursive: true, force: true }));
   const evidence = join(workspace, 'evidence.txt');
   await writeFile(evidence, 'ACTUAL_READ_RESULT_7319\n');
+  const image = join(workspace, 'pixel.png');
+  // Opaque test fixture: the endpoint checks image transport, not visual interpretation.
+  await writeFile(image, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==', 'base64'));
+  const vision = scenario === 'vision' || scenario === 'broken-extension';
+  const reviewer = scenario === 'reviewer-grant';
   const requests = [];
   const server = createServer(async (req, res) => {
     try {
@@ -43,20 +49,27 @@ test('real pi-subagents loads installed roles and executes native workers with s
       for await (const chunk of req) raw += chunk;
       const body = JSON.parse(raw);
       const tools = (body.tools ?? []).map(tool => tool.function?.name ?? tool.name);
-      const parent = tools.includes('subagent') || tools.includes('subagents_enable');
       const messages = body.messages ?? [];
+      const parent = messages.some(message => message.role === 'user' && text(message.content).includes('MAIN_DISPATCH_7319'));
       const results = messages.filter(message => message.role === 'tool');
-      requests.push({ model: body.model, effort: body.reasoning_effort, tools, parent });
+      const hasImages = messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
+      requests.push({ model: body.model, effort: body.reasoning_effort, tools, parent, hasImages });
       let call, answer;
       const launches = messages.filter(message => message.role === 'assistant')
         .flatMap(message => message.tool_calls ?? []).filter(tool => tool.function?.name === 'subagent');
       if (parent && !tools.includes('subagent')) call = { name: 'subagents_enable', arguments: '{}' };
-      else if (parent && launches.length < 2) call = { name: 'subagent', arguments: JSON.stringify({
-        agent: launches.length === 0 ? 'scout' : 'task', task: `Read ${evidence} and report its contents. Do not edit any files.`,
+      else if (parent && launches.length < (scenario === 'roles' ? 2 : 1)) call = { name: 'subagent', arguments: JSON.stringify({
+        agent: vision ? 'image-analyst' : reviewer ? 'reviewer' : launches.length === 0 ? 'scout' : 'task',
+        task: vision ? `Inspect ${image} and return a concise visual observation with its evidence path.` : `Read ${evidence} and report its contents. Do not edit any files.`,
         async: false, options: { context: 'fresh', agentScope: 'user', mission: false, acceptance: { level: 'none', reason: 'Read-only integration check' } },
       }) };
-      else if (!parent && tools.includes('read') && !results.length) call = { name: 'read', arguments: JSON.stringify({ path: evidence }) };
-      else answer = `${parent ? 'PARENT_DONE' : 'NATIVE_WORKER_DONE'} ${body.model}\n${results.map(message => text(message.content)).join('\n')}`;
+      else if (!parent && reviewer && tools.includes('subagent') && launches.length < 2) call = { name: 'subagent', arguments: JSON.stringify({
+        agent: launches.length === 0 ? 'task' : 'scout',
+        task: `Read ${evidence} and report its contents. Do not edit.`,
+        async: false, options: { context: 'fresh', mission: false, acceptance: { level: 'none', reason: 'Read-only nested check' } },
+      }) };
+      else if (!parent && tools.includes('read') && !results.length) call = { name: 'read', arguments: JSON.stringify({ path: vision ? image : evidence }) };
+      else answer = `${parent ? 'PARENT_DONE' : 'NATIVE_WORKER_DONE'} ${body.model}\n${hasImages ? 'IMAGE_TRANSPORT_CONFIRMED' : ''}\n${results.map(message => text(message.content)).join('\n')}`;
       const delta = call ? { role: 'assistant', tool_calls: [{ index: 0, id: `call_${requests.length}`, type: 'function', function: call }] }
         : { role: 'assistant', content: answer };
       const event = (delta, finish_reason = null) => ({ id: `response_${requests.length}`, object: 'chat.completion.chunk',
@@ -80,10 +93,10 @@ test('real pi-subagents loads installed roles and executes native workers with s
   Object.assign(settings, { defaultProvider: 'smoke', defaultModel: 'parent', defaultThinkingLevel: 'medium', retry: { enabled: false },
     cacheWarming: 'off', enableInstallTelemetry: false, enableAnalytics: false, quietStartup: true });
   await writeFile(settingsPath, JSON.stringify(settings));
-  const model = id => ({ id, name: id, reasoning: true, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  const model = id => ({ id, name: id, reasoning: true, input: ['text', 'image'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000, maxTokens: 4096, compat: { supportsReasoningEffort: true } });
   await writeFile(join(target, 'models.json'), JSON.stringify({ providers: { smoke: {
-    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, api: 'openai-completions', apiKey: 'local-only', models: [model('parent'), model('worker')],
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, api: 'openai-completions', apiKey: 'local-only', models: [model('parent'), model('worker'), model('reviewer'), model('vision')],
   } } }));
   const config = YAML.parse(await readFile(join(repo, 'config.example.yaml'), 'utf8'));
   await mkdir(join(root, 'definitions'));
@@ -96,29 +109,53 @@ test('real pi-subagents loads installed roles and executes native workers with s
       agent.effort = name === 'task' ? 'high' : 'inherit';
     }
   }
+  config.agents.reviewer.model = 'smoke/reviewer';
+  config.agents.reviewer.effort = 'high';
+  config.agents['image-analyst'].model = 'smoke/vision';
+  config.agents['image-analyst'].effort = 'low';
+  config.agents['image-analyst'].extensions = { pi: [] };
+  if (scenario === 'broken-extension') {
+    await writeFile(join(root, 'broken.mjs'), 'export default function () { throw new Error("Inspection extension could not initialize"); }\n');
+    config.agents['image-analyst'].extensions.pi = ['broken.mjs'];
+    config.agents['image-analyst'].tools.pi = ['read', 'inspection_tool'];
+  }
   const configPath = join(root, 'config.local.yaml');
   await writeFile(configPath, YAML.stringify(config));
   const install = await run(process.execPath, [join(repo, 'scripts/install.mjs'), '--client', 'pi', '--config', configPath,
     '--agent-dir', target, '--pi-subagents-dir', plugin], workspace, env);
   assert.equal(install.code, 0, install.stderr);
   const result = await run(process.execPath, [cli, '--mode', 'json', '-p', '--no-session', '--provider', 'smoke', '--model', 'parent',
-    '--thinking', 'medium', 'Use the installed scout and task roles for two read-only file checks.'], workspace, env);
+    '--thinking', 'medium', 'MAIN_DISPATCH_7319: Delegate the requested evidence inspection to the configured roles.'], workspace, env);
   assert.equal(result.code, 0, result.stderr);
   const events = result.stdout.trim().split('\n').map(line => JSON.parse(line));
   const completed = events.filter(event => event.type === 'tool_execution_end' && event.toolName === 'subagent');
-  assert.equal(completed.length, 2, result.stdout + result.stderr);
+  assert.equal(completed.length, scenario === 'roles' ? 2 : 1, result.stdout + result.stderr);
+  if (scenario === 'broken-extension') {
+    assert.equal(completed[0].isError || completed[0].result?.isError, true, JSON.stringify(completed));
+    assert.equal(requests.filter(request => !request.parent).length, 0, 'A missing inspection tool must not silently fall back to another worker');
+    return;
+  }
   for (const event of completed) {
     assert.notEqual(event.isError, true, JSON.stringify(event));
     assert.notEqual(event.result?.isError, true, JSON.stringify(event));
-    assert.match(JSON.stringify(event.result), /ACTUAL_READ_RESULT_7319/);
+    assert.match(JSON.stringify(event.result), vision ? /IMAGE_TRANSPORT_CONFIRMED/ : /ACTUAL_READ_RESULT_7319/);
   }
   const workers = requests.filter(request => !request.parent && request.tools.includes('read'));
-  assert.ok(workers.some(request => request.model === 'parent' && request.effort === 'medium' && !request.tools.includes('bash') && !request.tools.includes('write')),
-    JSON.stringify(workers.map(({model, effort, tools}) => ({model, effort, tools}))));
-  assert.ok(workers.some(request => request.model === 'worker' && request.effort === 'high' && request.tools.includes('write')));
-  assert.ok(workers.every(request => !request.tools.includes('subagent') && !request.tools.includes('agent_config_task')));
-  assert.ok(requests.filter(request => request.parent).every(request => !request.tools.includes('agent_config_task')));
+  if (vision) {
+    assert.ok(workers.some(request => request.model === 'vision' && request.effort === 'low' && request.hasImages));
+    assert.ok(workers.every(request => !request.tools.includes('subagent')));
+    assert.ok(requests.filter(request => request.parent).every(request => !request.hasImages), 'The vision-capable parent receives the result, not every image again');
+  } else if (reviewer) {
+    assert.ok(workers.some(request => request.model === 'reviewer' && request.tools.includes('subagent')));
+    assert.ok(workers.some(request => request.model === 'reviewer' && !request.tools.includes('subagent') && !request.tools.includes('bash')), 'Allowed nested scout executes');
+    assert.ok(requests.every(request => request.model !== 'worker'), 'Reviewer must not launch the forbidden task role');
+  } else {
+    assert.ok(workers.some(request => request.model === 'parent' && request.effort === 'medium' && !request.tools.includes('bash') && !request.tools.includes('write') && !request.tools.includes('subagent')));
+    assert.ok(workers.some(request => request.model === 'worker' && request.effort === 'high' && request.tools.includes('write') && request.tools.includes('subagent')));
+  }
+  assert.ok(requests.every(request => !request.tools.includes('agent_config_task')));
   const final = events.filter(event => event.type === 'message_end' && event.message?.role === 'assistant').at(-1);
   assert.match(text(final?.message?.content), /PARENT_DONE/);
-  assert.match(text(final?.message?.content), /ACTUAL_READ_RESULT_7319/);
+  assert.match(text(final?.message?.content), vision ? /IMAGE_TRANSPORT_CONFIRMED/ : /ACTUAL_READ_RESULT_7319/);
 });
+}

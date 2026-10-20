@@ -10,7 +10,13 @@
 - [pi 확장 API](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
 - [pi 공식 서브에이전트 예제](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent/examples/extensions/subagent)
 
-pi 실행은 기존 `nicobailon/pi-subagents`에 맡긴다. 자체 확장·runner 코드는 제공하지 않는다. 변환 계약은 설치된 패키지의 버전별 문서로 확인하며, `main` 문서의 변경을 검증 없이 적용하지 않는다.
+OMP에서는 내장 역할을 그대로 사용한다. pi 실행은 기존 `nicobailon/pi-subagents`에 맡기고 OMP 일반 역할의 대응 정의만 설치한다. 자체 확장·runner 코드는 제공하지 않는다. `main` 문서의 변경을 검증 없이 적용하지 않는다.
+
+## OMP 역할 원본과 pi 이식
+
+기준은 OMP `v18.12.1`, commit `291e055836c210f314af3f73f53244e8e9d09de8`이다. 실제 binary export, 역할별 대응 범위, 보존한 반환 의미와 변경한 runtime 문법은 [출처 기록](agent/upstream/oh-my-pi/PROVENANCE.md)에 있다. 일반 역할 5개의 원본과 [MIT 고지](agent/upstream/oh-my-pi/LICENSE)를 보존하며, 생성된 pi 역할과 함께 고지 사본을 설치한다.
+
+이 차용은 아래의 `code-yeongyu/oh-my-openagent` 운영 아이디어 참고와 별개다. OMP의 MIT 고지를 다른 프로젝트나 이 저장소 전체의 라이선스로 확대하지 않는다. 이미지·고난도 추가 역할은 독립적으로 작성한 정의다.
 
 ## pi 서브에이전트 선택 근거
 
@@ -42,7 +48,7 @@ pi 실행은 기존 `nicobailon/pi-subagents`에 맡긴다. 자체 확장·runne
 - [OpenAI category prompts](https://github.com/code-yeongyu/oh-my-openagent/blob/1abeb9dfaa6d8bc2ec442127e3434dfb1390046c/packages/senpi-task/src/category/openai-categories.ts): 단순 작업에는 명확한 절차, 어려운 작업에는 목표·제약을 전달하고 작업자가 결과까지 책임지는 원칙을 참고했다.
 - [Manifesto](https://github.com/code-yeongyu/oh-my-openagent/blob/1abeb9dfaa6d8bc2ec442127e3434dfb1390046c/docs/manifesto.md): 불필요한 사용자 개입과 반복 조사를 줄이는 방향을 참고했다.
 
-조율만 하는 메인, 고정된 다중 검증 단계, 전용 명령·hook·오케스트레이션 엔진은 가져오지 않았다. 운영 아이디어를 참고해 프롬프트를 작성했으며 원문 프롬프트·코드를 복사하거나 번역해 배포하는 구성이 아니다. 참고 프로젝트의 [Sustainable Use License](https://github.com/code-yeongyu/oh-my-openagent/blob/1abeb9dfaa6d8bc2ec442127e3434dfb1390046c/LICENSE.md)를 MIT로 취급하지 않는다.
+조율만 하는 메인, 고정된 다중 검증 단계, 전용 명령·hook·오케스트레이션 엔진은 가져오지 않았다. 이 절의 Oh My OpenAgent에서는 운영 아이디어를 참고했으며 원문 프롬프트·코드를 복사하거나 번역해 배포하지 않는다. 해당 프로젝트의 [Sustainable Use License](https://github.com/code-yeongyu/oh-my-openagent/blob/1abeb9dfaa6d8bc2ec442127e3434dfb1390046c/LICENSE.md)를 MIT로 취급하지 않는다. 위 OMP 역할의 고정 버전 차용과 구분한다.
 
 비용·품질·캐시 정책의 추가 참고 revision은 `b78527c13f79548f8c655020bf63906912f1fd4a`다. 해당 [manifesto](https://github.com/code-yeongyu/oh-my-openagent/blob/b78527c13f79548f8c655020bf63906912f1fd4a/docs/manifesto.md), [모델·역할 선택](https://github.com/code-yeongyu/oh-my-openagent/blob/b78527c13f79548f8c655020bf63906912f1fd4a/docs/guide/agent-model-matching.md), [캐시 설정 설명](https://github.com/code-yeongyu/oh-my-openagent/blob/b78527c13f79548f8c655020bf63906912f1fd4a/docs/reference/configuration.md#L1256-L1296)을 참고했다. 당시 계획과 리뷰 기록은 [완료된 계획 문서](plans/cost-quality-policy.md)에 보존한다.
 

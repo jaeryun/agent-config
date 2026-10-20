@@ -1,66 +1,72 @@
 # Agent Config
 
-**메인 오케스트레이터와 전문 서브에이전트의 역할·행동·협업 체계를 정의하고, 개인 YAML을 기준으로 OMP와 pi에 적용하는 저장소다.**
+**OMP의 내장 에이전트 이름·기능을 그대로 사용하고, 개인 모델 정책과 추가 역할을 관리하며, pi에도 대응 역할을 적용하는 설정 저장소다.**
 
-에이전트 정의는 이 저장소가 소유한다. 모델·effort·활성 역할·개인 정의 경로는 gitignore된 `config.local.yaml`에서 관리한다. 실행은 **OMP의 네이티브 task** 또는 **기존 `nicobailon/pi-subagents` 플러그인**에 맡긴다. 자체 서브에이전트 실행기·스케줄러·플러그인을 만들거나 설치하지 않는다.
+실행은 OMP의 네이티브 `task`와 기존 [`nicobailon/pi-subagents`](https://github.com/nicobailon/pi-subagents)에 맡긴다. 자체 실행기·스케줄러를 만들지 않으며 기본 역할을 일괄 비활성화하거나 이름을 바꾸지 않는다.
 
 ## AI에게 설치 맡기기
 
-사용하는 OMP 또는 pi에 다음 요청을 전달한다.
-
 ```text
-https://github.com/jaeryun/agent-config 를 내 환경에 설치해 줘.
-README.md와 INSTALL.md를 읽고 현재 클라이언트와 설치된 플러그인을 확인해.
-기존 config.local.yaml이 있으면 사용하고, 없으면 예제를 바탕으로
-내 사용 가능 모델과 선택을 반영해 작성해 줘.
-pi라면 nicobailon/pi-subagents의 실제 버전과 정의 형식을 확인하고
-기존 플러그인에 적용해. 별도 실행기를 만들거나 다른 플러그인으로 대체하지 마.
-기존 지침·인증·무관한 설정을 보존하고 dry-run 후 설치해.
-새 세션의 실제 역할 목록과 모델·effort를 확인하고,
-모델 호출까지 확인했는지는 별도로 보고해 줘.
+https://github.com/jaeryun/agent-config 를 내 환경에 적용해 줘.
+README.md와 INSTALL.md를 읽고 OMP인지 pi인지 실제 런타임을 확인해.
+기존 개인 설정과 인증을 보존하고 config.local.yaml을 준비해 줘.
+OMP에서는 내장 역할을 덮어쓰지 말고 모델·effort 배정만 연결해.
+pi에서는 기존 nicobailon/pi-subagents에 대응 역할을 등록해.
+저가 비전 역할에는 내 환경에서 사용할 수 있는 저가 이미지 지원 모델을 배정해.
+특정 브라우저나 도구에 역할을 한정하지 마.
+dry-run 후 적용하고, 실제 역할 출처·모델·effort·도구 로딩을 확인해.
+실제 모델 호출까지 검증했는지와 미확인 항목을 구분해서 보고해 줘.
 ```
 
-전체 절차는 [INSTALL.md](INSTALL.md)에 있다. 지원 범위는 OMP와 pi이며, **pi의 지원 플러그인은 npm 패키지 `pi-subagents`**다. `@tintinweb/pi-subagents`, 공식 subagent 예제 등 다른 동명 구현에 그대로 적용된다고 가정하지 않는다.
+지원 대상은 **OMP**와 **pi + npm:pi-subagents**다. 다른 동명 플러그인은 같은 계약으로 취급하지 않는다. AI용 전체 절차는 [INSTALL.md](INSTALL.md)에 있다.
 
-## 왜 이 pi 플러그인인가
+## 역할 구성
 
-pi는 서브에이전트 실행기를 기본 제공하지 않으며 공식 저장소에는 확장 예제가 있다. 공식 단일 표준이 지정되어 있다는 근거는 없다. 조사한 후보 중 `nicobailon/pi-subagents`는 [pi 공식 패키지 목록](https://pi.dev/packages/pi-subagents)에 등록되어 있고, 사용 지표와 기존 모델·thinking·작업자 관리 기능을 고려하면 이 프로젝트의 기본 지원 대상으로 타당하다. 비교 근거와 지표의 한계는 [REFERENCES.md](REFERENCES.md)에 기록한다.
+| 역할 | OMP | pi |
+|---|---|---|
+| `task` | 내장 범용 작업자 | OMP 기반 대응 정의. 허용된 범위에서 재위임할 수 있다. |
+| `sonic` | 내장 기계적 작업자 | 정해진 변환·자료 수집을 담당한다. |
+| `scout` | 내장 읽기 전용 탐색 | 검색 대안·조사 깊이·상세 보고 완결성을 유지한다. |
+| `reviewer` | 내장 코드 리뷰, scout 위임 | 패치 결함·소비자 routing·심각도·위치·판정을 검토한다. scout 위임을 허용한다. |
+| `security-reviewer` | 내장 보안 리뷰 | 비신뢰 데이터, source-to-sink, 방어·근거·검토 범위를 확인한다. |
+| `seance` | 기존 native 과거 세션 상담 기능 | 이식하지 않는다. 프롬프트만으로 같은 기능이라고 주장하지 않는다. |
+| `deep` | 추가 사용자 역할 | 원인·설계 판단이 어려운 구현을 끝까지 담당한다. |
+| `image-analyst` | 추가 저가 비전 역할 | 같은 목적의 사용자 역할이다. |
 
-설치기가 받는 플러그인 버전 범위는 **0.79.x 중 0.79.1 이상**이다. 다른 버전을 자동 교체하지 않는다. 이전 자체 어댑터에서의 pi 0.73.1·1.3.0 테스트는 이 플러그인의 검증이 아니며, 현재 호환성 근거로 사용하지 않는다. 실제 확인한 조합과 범위는 [변경 이력](CHANGELOG.md)에 구분한다.
+OMP의 내장 5개 역할을 사용자 파일로 덮어쓰지 않는다. 내장 프롬프트·도구·출력 스키마·재위임 기능은 OMP가 소유한다. pi용 일반 역할은 OMP **18.12.1**의 의미를 바탕으로 작성했으며, [원본·버전·MIT 고지](agent/upstream/oh-my-pi/PROVENANCE.md)를 보존한다. pi의 반환·통신 문법은 기존 플러그인 계약을 사용한다.
 
-현재 실제 실행 확인 조합은 **pi 1.3.0 + pi-subagents 0.79.1**, macOS arm64다. 다른 버전·OS는 이 검증에 포함하지 않았으며 사용자의 환경에서 별도 로딩·실행 확인이 필요하다.
+다른 사용자·프로젝트 정의와 플러그인의 나머지 내장 역할은 임의로 삭제하거나 비활성화하지 않는다. 프로젝트·사용자 override 때문에 실제 출처가 달라질 수 있으므로 설치 후 확인한다.
 
-## 에이전트 구성
+## 저가 비전 역할
 
-| 역할 | 책임 |
-|---|---|
-| `orchestrator` | 요청 이해, 직접 작업 또는 위임 판단, 결과 통합과 최종 완료를 책임진다. |
-| `task` | 기존 설계와 관례를 따르는 일반 구현을 조사부터 확인까지 담당한다. |
-| `sonic` | 규칙과 예외가 정해진 기계적 변경·자료 수집을 담당한다. |
-| `scout` | 위치를 모르는 코드와 자료를 읽기 전용으로 탐색한다. |
-| `deep` | 원인이 불명확한 결함과 설계 판단이 필요한 구현을 담당한다. |
-| `reviewer` | 정확성·호환성 결함을 읽기 전용으로 검토한다. |
-| `security-reviewer` | 인증·인가·secret·외부 입력 경계를 읽기 전용으로 검토한다. |
-| `image-analyst` | 원본 이미지를 관찰하고 텍스트 결과와 증거 경로만 반환한다. |
+`image-analyst`는 특정 도구 전담 전문가가 아니라 **이미지·화면 처리량이 많은 작업의 비용을 분리하는 작업자**다.
 
-메인은 조율만 하지 않는다. 작은 작업은 직접 처리하고, 위임은 불확실성·위험·독립성과 실제 이익을 기준으로 결정한다. 작업자는 재위임하지 않으며 메인이 통합과 완료를 책임진다. 모든 작업에 전문가 팀이나 고정 리뷰 단계를 요구하지 않는다.
+- 메인이 비전을 지원하지 않으면 이미지 설명·OCR·관찰 근거를 제공한다.
+- 메인이 비전을 지원해도 반복적인 이미지 비교·문서 이미지·화면/UX 순회는 위임할 수 있다. 단발성 이미지는 지원 모델이 직접 처리할 수 있다.
+- 주어진 도구로 필요한 읽기·캡처·허용된 상호작용과 점검을 수행한다. Playwright는 가능한 사용 예이지 필수 의존성이나 역할 범위가 아니다.
+- 메인에는 과업별 결과·미확인 항목·필요한 증거 경로를 전달한다. 모든 원본 이미지와 로그를 메인이 다시 소비하게 만들지 않는다.
+- 시각적 관찰과 기능 성공 증거를 구분하고, 요청한 범위를 비용 때문에 생략하지 않는다. 더 비싼 모델로 조용히 fallback하지 않는다.
 
-## 원본과 개인 설정
+모델·effort는 개인 YAML에서 고른다. 예제의 `inherit`는 환경 중립적인 시작값일 뿐, 이미지 지원이나 더 낮은 비용을 보장하지 않는다. **비용 분리를 위해 사용하기 전에는 실제 사용할 수 있는 저가 비전 모델을 명시해야 한다.**
+
+## 파일과 설정 원본
 
 ```text
-agent/AGENTS.md               # 공통 메인 오케스트레이터 정의
-agent/agents/*.md             # 공통 서브에이전트 7개 정의
-config.example.yaml          # 공개 설정 예제
-config.local.yaml            # 개인 모델·effort·정의 매핑; gitignore
-.local/                      # 개인 정의 파일; gitignore
-scripts/install.sh           # OMP/pi 설정 변환·설치 진입점
-INSTALL.md                   # AI용 설치·검증·원복 절차
+agent/AGENTS.md                    # 메인의 작업 배분·완료 정책
+agent/agents/{task,sonic,...}.md    # 일반 역할 5개는 pi용 OMP 대응 정의
+agent/agents/deep.md               # 양쪽에 설치하는 추가 역할
+agent/agents/image-analyst.md      # 양쪽에 설치하는 저가 비전 역할
+agent/upstream/oh-my-pi/           # 고정 원본·출처·MIT 고지
+config.example.yaml               # 공개 v2 예제
+config.local.yaml                 # 개인 YAML; gitignore
+.local/                           # 개인 정의·비공개 백업; gitignore
+scripts/install.sh                # 설정 변환·설치·제거 진입점
 ```
 
-전체 예제는 [`config.example.yaml`](config.example.yaml)이다. 개인 파일이 없을 때만 `config.local.yaml`로 복사한다.
+[`config.example.yaml`](config.example.yaml)을 개인 파일이 없을 때만 복사한다. **YAML 버전은 2**이며 설치기가 원본을 자동 수정하지 않는다.
 
 ```yaml
-version: 1
+version: 2
 concurrency: 3
 agents:
   orchestrator:
@@ -69,52 +75,58 @@ agents:
     model: inherit
     effort: inherit
   task:
-    description: Implement one cohesive change.
+    description: General-purpose worker.
     definition: agent/agents/task.md
-    model: inherit
-    effort: {omp: medium, pi: inherit}
+    model: {omp: native, pi: inherit}
+    effort: {omp: native, pi: inherit}
+    spawns:
+      pi: "*"
     tools:
-      omp: [read, grep, glob, bash, eval, edit, write]
       pi: [read, bash, edit, write, grep, find, ls]
 ```
 
-- `definition`은 YAML 디렉터리 안의 상대 Markdown 경로다. 절대 경로, `..`, 바깥을 가리키는 링크는 허용하지 않는다. 개인 정의는 `.local/`에 둘 수 있다.
-- `model`은 `inherit` 또는 정확한 `provider/model-id`다. `effort`는 별도로 `inherit`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` 중 지원되는 값을 선택한다.
-- `model`·`effort`에 `{omp: 값, pi: 값}`을 지정하면 환경별 provider ID와 지원 수준을 구분할 수 있다.
-- 메인은 모델·effort를 둘 다 `inherit`로 유지하거나 둘 다 명시한다. 명시적 값은 새 세션의 시작값이다.
-- OMP 작업자의 effort는 명시해야 한다. pi의 `effort: inherit`는 `thinking`을 생략한다. 사용자 `subagents.defaultThinking`이 있으면 부모 effort 상속과 충돌하므로 설치를 거부하고 결정을 요구한다.
-- pi의 사용자 role override가 생성할 정의를 덮어쓰는 경우에도 자동 삭제하거나 무시하지 않고 중단한다. 기존 설정과 YAML을 먼저 조정한다. 프로젝트별 override와 실제 로딩값은 작업 디렉터리에서 확인해야 한다.
-- API key·OAuth token은 YAML에 넣지 않는다. 인증은 각 클라이언트가 관리한다. 개인 YAML과 `.local/`은 push하지 않는다.
+### 모델·effort
 
-## 환경별 적용
+- OMP **내장 역할**의 `native`/`native`는 기존 native routing과 effort를 보존한다. 현재 부모 모델 상속과 같지 않다. 명시적 배정은 정확한 `provider/model-id`와 effort를 함께 지정한다. `task.agentModelOverrides.<name>`에 연결하며 역할 정의는 바꾸지 않는다.
+- OMP **추가 역할**의 모델 `inherit`는 부모 모델을 사용한다. effort는 명시해야 한다.
+- pi의 `model: inherit`는 활성 부모 모델을 사용하며, `effort: inherit`는 thinking을 생략한다. 기존 `subagents.defaultThinking`이나 역할 override와 충돌하면 자동 무시하지 않고 조정이 필요하다고 보고한다.
+- 메인은 모델·effort를 둘 다 `inherit`로 유지하거나 둘 다 명시한다. 명시적 값은 새 세션의 시작 설정이다.
+- 각 필드는 공통 문자열 또는 `{omp: 값, pi: 값}`으로 지정할 수 있다. 인증 정보는 넣지 않는다.
+
+### 정의·도구·재위임
+
+- `definition`은 YAML 디렉터리 안의 상대 Markdown 경로다. OMP 내장 이름에서는 **pi용 정의**로만 사용한다.
+- 내장 역할의 `tools.omp`·`spawns.omp`는 거부한다. native 도구·권한을 덮어쓰거나 설정을 조용히 무시하지 않기 위해서다.
+- 추가 역할에는 `tools.omp`·`tools.pi`를 지정한다. pi extension/MCP 도구는 실제 제공되는 이름과 필요한 extension을 확인한다.
+- `spawns`는 환경별 `"*"` 또는 역할 이름 배열이다. 기본은 빈 배열이다. pi에서 grant가 있으면 네이티브 재위임 도구와 allowlist를 함께 연결하며 runtime depth/정책 제한은 유지한다.
+- `extensions: {pi: ["./.local/browser-extension.ts"]}`로 이미 존재하는 자식용 extension을 지정할 수 있다. 경로는 YAML 기준으로 해석한다. 빈 배열은 ambient extension 비활성화이며 provider까지 빠질 수 있으므로 주의한다. 이 저장소가 extension을 다운로드하거나 구현하지 않는다.
+
+## 적용 방식
 
 | 항목 | OMP | pi + pi-subagents |
 |---|---|---|
 | 메인 지침 | `AGENTS.md` 관리 구역 | `AGENTS.md` 관리 구역 |
-| 작업자 정의 | `extensions/agent-config/agents/*.md` | `agents/*.md` |
-| 모델·effort | 네이티브 model selector·thinkingLevel | 플러그인의 `model`·`thinking` frontmatter |
-| 실행 도구 | `task` | `subagent` / 필요 시 `subagents_enable` |
-| 후속 작업 | OMP의 작업자 관리 기능 | 플러그인의 상태·steer·resume·supervisor 기능 |
-| 동시 실행 설정 | `task.maxConcurrency` | native run의 `globalConcurrencyLimit`·`parallel.concurrency` |
+| 일반 역할 | 내장 정의 유지 | `agents/*.md`에 대응 정의 설치 |
+| 추가 역할 | `extensions/agent-config/agents/*.md` | `agents/*.md` |
+| 명시 모델 배정 | `task.agentModelOverrides` | `model`·`thinking` frontmatter |
+| concurrency | `task.maxConcurrency` | native run의 `globalConcurrencyLimit`·`parallel.concurrency` |
 
-pi의 `concurrency`는 **한 run 내부의 기본 제한**이다. 서로 독립된 여러 run을 포괄하는 새 전역 제한을 만들지 않으며, 네이티브 호출별 override까지 보안 경계로 차단한다고 주장하지 않는다. 플러그인의 다른 기능과 설정은 보존한다.
+OMP의 batch·async·재귀 깊이·effort 노출·advisor/prewalk/LSP 옵션은 강제하지 않는다. 기존 설치 manifest가 관리한 값이면 기록된 이전 값으로 복구한다. 이름을 유지하므로 기존 account pool·model scope 같은 이름별 정책을 임의로 옮기지 않는다.
 
-pi 작업자는 새 문맥을 기본으로 하고 프로젝트 지침과 사용 가능한 skill을 읽는다. 전역 메인 지침은 상속하지 않으며 재위임은 금지한다. 확장 로딩·진행 표시·비동기 실행·출력 관리는 플러그인 계약을 따른다. 이미지 입력과 브라우저 기능은 선택 모델 및 실제 제공 도구의 능력을 확인해야 한다.
+지원 확인 기준은 OMP 18.12.1, pi 1.3.0 + pi-subagents 0.79.1이다. pi plugin은 0.79.x 중 0.79.1 이상을 확인하며, 다른 패치·OS까지 실행 검증했다고 주장하지 않는다. OMP의 native 모델 fallback·effort 조정 가능성도 남으므로 실제 resolved 값을 확인해야 한다.
 
-## 직접 설치하기
-
-Node.js 22 이상, npm과 대상 클라이언트가 필요하다. pi 자체가 요구하는 Node.js 최소 버전도 충족해야 한다.
+## 설치·갱신·제거
 
 ```sh
 npm ci --omit=dev --ignore-scripts
-# config.local.yaml이 없는 경우에만 복사하고 개인 설정을 작성한다.
+# 개인 파일이 없을 때만 복사하고 환경에 맞게 편집한다.
 cp config.example.yaml config.local.yaml
 
 ./scripts/install.sh --client omp --dry-run
 ./scripts/install.sh --client omp
 ```
 
-pi는 먼저 같은 프로필에 지원 플러그인이 설치되어 있어야 한다. 기존 호환 설치는 재사용한다.
+pi는 같은 프로필에 지원 플러그인이 설치되어 있어야 한다. 기존 호환 설치는 재사용한다.
 
 ```sh
 pi install npm:pi-subagents@0.79.1
@@ -122,20 +134,16 @@ pi install npm:pi-subagents@0.79.1
 ./scripts/install.sh --client pi
 ```
 
-표준 npm 설치는 `<agent-dir>/npm/node_modules/pi-subagents`에서 확인한다. git/local 설치는 `--pi-subagents-dir /absolute/plugin/root`를 지정한다. 이 옵션은 **기존 플러그인을 확인하는 경로**이지 플러그인을 새로 로딩하는 옵션이 아니다. 실제 활성화는 pi 설정과 새 세션에서 확인한다.
+`--client`는 필수다. 대상은 `--agent-dir` > `PI_CODING_AGENT_DIR` > `~/.omp/agent` 또는 `~/.pi/agent` 순서다. git/local plugin 설치는 `--pi-subagents-dir`로 실제 패키지 루트를 지정한다. 이 옵션은 실제 pi 로딩 등록을 대신하지 않는다.
 
-대상 경로는 `--agent-dir` > `PI_CODING_AGENT_DIR` > `~/.omp/agent` 또는 `~/.pi/agent` 순서다. `--client`는 필수다. 기존 지침과 무관한 설정을 보존하며, 관리 파일 충돌은 덮어쓰지 않는다. YAML·정의를 수정하면 재설치하고 새 세션을 연다.
-
-## 이전 설치에서 전환·제거
-
-이전 자체 pi 어댑터가 설치되어 있다면 같은 대상·설치 상태를 사용해 재설치한다. 설치기가 소유한 `extensions/agent-config/index.ts`와 `config.json`은 제거하고 플러그인 정의로 전환한다. 해당 파일이 변경됐거나 소유 기록이 없으면 임의로 삭제하지 않는다. **기존 pi-subagents 패키지는 교체·삭제하지 않는다.**
+v1 YAML과 이전 설치의 전환은 [INSTALL.md](INSTALL.md#기존-구성에서-v2로-전환)에 설명한다. 개인 YAML·정의를 수정하면 재설치하고 새 세션을 연다. 생성된 파일을 원본 대신 수정하지 않는다.
 
 ```sh
 ./scripts/install.sh --client pi --uninstall --dry-run
 ./scripts/install.sh --client pi --uninstall
 ```
 
-제거는 이 저장소의 정의와 관리한 설정만 대상으로 한다. 플러그인 자체는 유지한다. 상세 복구 절차는 [설치 안내](INSTALL.md#갱신과-제거)에 있다. 오래된 OMP 링크 설치도 새 설치 실행이 필요하며, 그 전에는 소스 변경의 영향을 받을 수 있다.
+제거는 관리 파일과 설정만 원복하며 플러그인·인증·세션을 지우지 않는다. 백업·충돌·중단 복구의 범위는 설치 안내를 따른다.
 
 ## 검증과 출처
 
@@ -144,8 +152,8 @@ npm ci --ignore-scripts
 npm test
 ```
 
-개발 의존성은 실제 pi와 pi-subagents를 고정해 통합 검사에 사용한다. 제품 설치에는 포함할 필요가 없다. 회귀 검사는 설정·개인 지침 보존과 전환을 확인하고, 통합 검사는 실제 pi CLI에 실제 플러그인을 설치해 작업자 실행 경로를 확인한다. 로컬 endpoint 검증을 상용 모델의 답변 품질 평가로 설명하지 않는다.
+개발 의존성의 실제 pi와 pi-subagents를 사용해 역할 실행·권한·이미지 전달·extension 실패를 검증한다. 모델 응답은 로컬 endpoint로 제어하며, 이를 실제 상용 모델의 판단 품질 평가나 비용 절감 실측으로 설명하지 않는다.
 
-[변경 이력](CHANGELOG.md) · [참고 자료와 차용 고지](REFERENCES.md)
+[변경 이력](CHANGELOG.md) · [참고 자료](REFERENCES.md) · [현재 구현 계획](plans/custom-agent-cutover.md)
 
-`agent/upstream/`과 `plans/`는 과거 자료이며 실행·설치 대상이 아니다. 원격 설정·commit·push는 설치기 동작에 포함되지 않는다.
+과거 내장 비활성화·이름 변경 계획의 리뷰는 `plans/reviews/`에 역사적 기록으로 남긴다. 현재 구현의 승인이나 실행 검증을 대신하지 않는다. 설치기가 commit/push를 수행하지는 않는다.

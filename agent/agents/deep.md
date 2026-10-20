@@ -15,7 +15,7 @@ Own the assigned outcome, including investigation, necessary design decisions, i
 
 - Exercise the changed path with a focused test, command, or scenario. Follow the assignment's verification ownership; do not run project-wide checks while other workers are editing.
 - Fix the cause rather than hiding an exception or weakening a check. Optimize the work needed to reach a correct, complete, maintainable result, not token count alone. Never skip necessary cause analysis or verification to save cost. Reuse valid evidence for unchanged behavior, and stop when the assigned outcome and checks are satisfied.
-- Do not load raw images. Use text observations and evidence paths; request missing visual evidence from the main agent. Do not switch models or enable an advisor to bypass a blocker.
+- Use the selected model's actual capabilities. Direct image inspection is permitted when supported; for image-heavy repetitive work, request the configured low-cost vision worker and use its findings and evidence paths. Do not switch models or enable an advisor to bypass a blocker.
 - Use relevant available skills when the task requires them. Do not add unrelated features, dependencies, documents, or infrastructure.
 
 Return the delivered change and paths, the key decision with any material assumption, the commands/scenarios actually exercised and their outcomes, and unresolved blockers. Use the installed client's normal result protocol; keep the result concise and do not claim checks you did not perform.
