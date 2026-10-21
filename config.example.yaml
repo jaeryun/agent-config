@@ -1,27 +1,53 @@
 # Copy only when config.local.yaml does not exist. Private YAML/.local are ignored.
 # Structure example, NOT a recommended model/effort assignment or ready-to-install preset.
+# The model ids below are one private deployment's currently registered ids, included only so
+# the v3 shape is concrete. They are not recommendations, are not guaranteed to exist in your
+# profile, and must be replaced by exact ids you verify in your own profile.
 # Before applying, follow INSTALL.md: inspect the target client's registered models,
 # compare role candidates, interview the user, and agree on every assignment.
 # Existing private choices stay unchanged unless the user agrees to replace them.
-# OMP built-in names keep their native definitions; definition/tools.pi port them to pi.
-# native/native preserves OMP routing and effort, not active-parent inheritance.
-# Explicit provider/model + effort pins a worker without replacing its native prompt.
-# Custom roles use inherit for parent model; custom OMP effort must be explicit.
+#
+# v3 makes every assignment explicit: inherit/native, @alias, globs, and :effort-suffixed
+# models are rejected for the main and for workers.
+# agents.orchestrator.models is an ordered list. Its first entry is the startup default and
+# Ctrl+P cycles exactly this order for the CURRENT MAIN model and effort only.
+# Workers keep the fixed model/effort declared here; nothing follows the main model.
+# OMP built-in names keep their native prompts/tools/output contracts; definition and
+# tools.pi port them to pi. tools.omp/spawns.omp stay unsupported for those names.
+# Hidden is not disabled: OMP's built-in role names are hidden from the picker while internal
+# helper auto-selection and independently owned alias dependencies keep resolving. The installer
+# clears pre-existing allocations for OMP's 15 built-in model roles (only the hidden `default`
+# is re-pointed at the first choice) and drops the obsolete repo aliases deep/review unless an
+# unmanaged value still references one by alias (@role, pi/role, *); that mapping is then kept
+# hidden and reported on stdout. OMP enabledModels is left unset, and Ctrl+P only changes the
+# session model (native persist=false) without rewriting settings or worker overrides.
+# Optional per-client form when one role must resolve differently per client:
+#   model: {omp: provider/model-a, pi: provider/model-b}
+#   effort: {omp: high, pi: low}
+# OMP accepts one model with distinct efforts; pi cannot list the same model twice (any effort)
+# in agents.orchestrator.models. Declare distinct models for a shared list. The rule applies to
+# the main list only: workers are separate definitions and may reuse another role's model+effort.
 # Optional extensions: {pi: ["./.local/my-browser-extension.ts"]} loads existing child tools.
 # Pi concurrency is per-run. No repository-owned runner or global scheduler is installed.
-version: 2
+version: 3
 concurrency: 3
 agents:
   orchestrator:
     description: Own request understanding, delegation, integration, and completion.
     definition: agent/AGENTS.md
-    model: inherit
-    effort: inherit
+    # Ordered main choices. First entry = startup default; Ctrl+P cycles in this order.
+    models:
+      - model: openai-codex/gpt-6.1-sol
+        effort: high
+      - model: openai-codex/gpt-6-astra
+        effort: high
+      - model: opencode-go/deepseek-flash
+        effort: high
   task:
     description: General-purpose worker with full capabilities for delegated tasks.
     definition: agent/agents/task.md
-    model: {omp: native, pi: inherit}
-    effort: {omp: native, pi: inherit}
+    model: opencode-go/deepseek-flash
+    effort: high
     spawns:
       pi: "*"
     tools:
@@ -29,31 +55,31 @@ agents:
   sonic:
     description: Apply an explicit mechanical transformation or collect bounded facts.
     definition: agent/agents/sonic.md
-    model: {omp: native, pi: inherit}
-    effort: {omp: native, pi: inherit}
+    model: opencode-go/deepseek-flash
+    effort: low
     tools:
       pi: [read, bash, edit, write, grep, find, ls]
   scout:
     description: Explore an unmapped subsystem and return sourced findings without edits.
     definition: agent/agents/scout.md
-    model: {omp: native, pi: inherit}
-    effort: {omp: native, pi: inherit}
+    model: opencode-go/deepseek-flash
+    effort: low
     tools:
       pi: [read, grep, find, ls]
   deep:
     description: Resolve ambiguous bugs and design-sensitive implementation end to end.
     definition: agent/agents/deep.md
     # Draft only: agree on a capable model and its supported effort during the interview.
-    model: inherit
-    effort: {omp: medium, pi: inherit}
+    model: openai-codex/gpt-6.1-sol
+    effort: high
     tools:
       omp: [read, grep, glob, bash, eval, edit, write, web_search]
       pi: [read, bash, edit, write, grep, find, ls]
   reviewer:
     description: Review correctness and compatibility with evidence-backed findings only.
     definition: agent/agents/reviewer.md
-    model: {omp: native, pi: inherit}
-    effort: {omp: native, pi: inherit}
+    model: openai-codex/gpt-6.1-sol
+    effort: high
     spawns:
       pi: [scout]
     tools:
@@ -61,18 +87,18 @@ agents:
   security-reviewer:
     description: Review trust boundaries and report concrete security defects without edits.
     definition: agent/agents/security-reviewer.md
-    model: {omp: native, pi: inherit}
-    effort: {omp: native, pi: inherit}
+    model: openai-codex/gpt-6.1-sol
+    effort: high
     tools:
       pi: [read, grep, find, ls]
   image-analyst:
     description: Low-cost vision worker for image-heavy tasks, visual inspection, and non-vision model assistance using available tools.
     definition: agent/agents/image-analyst.md
     # Agree on an available image-capable model and supported effort before applying.
-    # Compare actual provider/plan costs; inherit/medium do not establish suitability.
+    # Compare actual provider/plan costs; a model id or an "image" flag does not establish suitability.
     # If no low-cost vision candidate exists, ask about an alternative or defer this role.
-    model: inherit
-    effort: {omp: medium, pi: inherit}
+    model: openai-codex/gpt-6-luna
+    effort: low
     tools:
       omp: [read, eval, write]
       pi: [read, bash]

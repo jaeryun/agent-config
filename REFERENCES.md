@@ -4,13 +4,18 @@
 
 - [OMP task와 작업자 실행](https://github.com/can1357/oh-my-pi/blob/v18.12.1/docs/tools/task.md)
 - [OMP 에이전트 발견·설정 우선순위](https://github.com/can1357/oh-my-pi/blob/v18.12.1/docs/task-agent-discovery.md)
+- [OMP 모델 역할·순환·태그 설정](https://github.com/can1357/oh-my-pi/blob/v18.12.1/docs/settings.md#models): `modelRoles`, `cycleOrder`, `modelTags`, `enabledModels`, `defaultThinkingLevel`의 의미와 병합 규칙.
+- [OMP 모델 카탈로그와 프리셋](https://github.com/can1357/oh-my-pi/blob/v18.12.1/docs/models.md)
 - [OMP 모델 해석과 인증 fallback 구현](https://github.com/can1357/oh-my-pi/blob/v18.12.1/packages/coding-agent/src/config/model-resolver.ts)
 - [pi 설정 경로와 사용자 지침](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/configuration.md)
 - [pi 설정 참조](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/settings.md)
+- [pi 모델 선택과 Ctrl+P 순환 범위](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/models.md): `defaultProvider`·`defaultModel`·`defaultThinkingLevel`·`enabledModels`와 `/scoped-models`의 의미.
 - [pi 확장 API](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
 - [pi 공식 서브에이전트 예제](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent/examples/extensions/subagent)
 
 OMP에서는 내장 역할을 그대로 사용한다. pi 실행은 기존 `nicobailon/pi-subagents`에 맡기고 OMP 일반 역할의 대응 정의만 설치한다. 자체 확장·runner 코드는 제공하지 않는다. `main` 문서의 변경을 검증 없이 적용하지 않는다.
+
+선택기·순환 목록의 역할 구성과 `modelTags` 항목의 `hidden` 처리는 `packages/coding-agent/src/config/model-roles.ts`를 기준으로 확인했다. 역할을 숨기면 선택기 목록에서 빠질 뿐 역할 해석과 실행은 그대로이며, 정의되지 않은 모델 종류 역할은 해당 역할의 내장 우선순위를 쓴다.
 
 ## OMP 역할 원본과 pi 이식
 

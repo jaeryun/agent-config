@@ -96,18 +96,19 @@ test(`real pi-subagents preserves native behavior: ${scenario}`, { timeout: 6000
   const model = id => ({ id, name: id, reasoning: true, input: ['text', 'image'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000, maxTokens: 4096, compat: { supportsReasoningEffort: true } });
   await writeFile(join(target, 'models.json'), JSON.stringify({ providers: { smoke: {
-    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, api: 'openai-completions', apiKey: 'local-only', models: [model('parent'), model('worker'), model('reviewer'), model('vision')],
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, api: 'openai-completions', apiKey: 'local-only', models: [model('parent'), model('worker'), model('scout'), model('reviewer'), model('vision')],
   } } }));
   const config = YAML.parse(await readFile(join(repo, 'config.example.yaml'), 'utf8'));
+  // The main list is a native Pi scope; the first entry is the startup model. Workers never inherit it.
+  config.agents.orchestrator.models = [{ model: 'smoke/parent', effort: 'medium' }, { model: 'smoke/scout', effort: 'low' }];
   await mkdir(join(root, 'definitions'));
   for (const [name, agent] of Object.entries(config.agents)) {
     const prompt = await readFile(join(repo, agent.definition), 'utf8');
     agent.definition = `definitions/${name}.md`;
     await writeFile(join(root, agent.definition), prompt);
-    if (name !== 'orchestrator') {
-      agent.model = name === 'task' ? 'smoke/worker' : 'inherit';
-      agent.effort = name === 'task' ? 'high' : 'inherit';
-    }
+    if (name === 'orchestrator') continue;
+    agent.model = { task: 'smoke/worker', scout: 'smoke/scout' }[name] ?? 'smoke/reviewer';
+    agent.effort = name === 'scout' ? 'low' : 'high';
   }
   config.agents.reviewer.model = 'smoke/reviewer';
   config.agents.reviewer.effort = 'high';
@@ -124,6 +125,10 @@ test(`real pi-subagents preserves native behavior: ${scenario}`, { timeout: 6000
   const install = await run(process.execPath, [join(repo, 'scripts/install.mjs'), '--client', 'pi', '--config', configPath,
     '--agent-dir', target, '--pi-subagents-dir', plugin], workspace, env);
   assert.equal(install.code, 0, install.stderr);
+  const installed = JSON.parse(await readFile(settingsPath, 'utf8'));
+  assert.deepEqual(installed.enabledModels, ['smoke/parent:medium', 'smoke/scout:low']);
+  assert.equal(installed.defaultProvider, 'smoke');
+  assert.equal(installed.defaultModel, 'parent');
   const result = await run(process.execPath, [cli, '--mode', 'json', '-p', '--no-session', '--provider', 'smoke', '--model', 'parent',
     '--thinking', 'medium', 'MAIN_DISPATCH_7319: Delegate the requested evidence inspection to the configured roles.'], workspace, env);
   assert.equal(result.code, 0, result.stderr);
@@ -146,11 +151,11 @@ test(`real pi-subagents preserves native behavior: ${scenario}`, { timeout: 6000
     assert.ok(workers.every(request => !request.tools.includes('subagent')));
     assert.ok(requests.filter(request => request.parent).every(request => !request.hasImages), 'The vision-capable parent receives the result, not every image again');
   } else if (reviewer) {
-    assert.ok(workers.some(request => request.model === 'reviewer' && request.tools.includes('subagent')));
-    assert.ok(workers.some(request => request.model === 'reviewer' && !request.tools.includes('subagent') && !request.tools.includes('bash')), 'Allowed nested scout executes');
+    assert.ok(workers.some(request => request.model === 'reviewer' && request.effort === 'high' && request.tools.includes('subagent')));
+    assert.ok(workers.some(request => request.model === 'scout' && request.effort === 'low' && !request.tools.includes('subagent') && !request.tools.includes('bash')), 'Allowed nested scout executes');
     assert.ok(requests.every(request => request.model !== 'worker'), 'Reviewer must not launch the forbidden task role');
   } else {
-    assert.ok(workers.some(request => request.model === 'parent' && request.effort === 'medium' && !request.tools.includes('bash') && !request.tools.includes('write') && !request.tools.includes('subagent')));
+    assert.ok(workers.some(request => request.model === 'scout' && request.effort === 'low' && !request.tools.includes('bash') && !request.tools.includes('write') && !request.tools.includes('subagent')));
     assert.ok(workers.some(request => request.model === 'worker' && request.effort === 'high' && request.tools.includes('write') && request.tools.includes('subagent')));
   }
   assert.ok(requests.every(request => !request.tools.includes('agent_config_task')));

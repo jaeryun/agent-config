@@ -1,5 +1,25 @@
 # 변경 이력
 
+## 2026-10-21 · YAML v3: 메인 모델 목록과 Ctrl+P
+
+### 변경
+
+- 개인 YAML 버전을 3으로 올렸다. `agents.orchestrator`의 `model`·`effort`를 순서 있는 `models: [{model, effort}]` 목록으로 바꿨다. 첫 항목이 새 세션의 시작 모델·effort이고, Ctrl+P는 그 목록만 순환하며 **현재 세션의 모델·effort만** 바꾼다(설정 파일·작업자 배정을 다시 쓰지 않고 native 기본 `persist=false`). 작업자는 메인 모델을 따라가지 않는다.
+- 메인·작업자 모두 `inherit`·`native`·`@alias`·glob(`*`, `?`, `[]`)·`:effort` 접미사 모델과 추상 effort를 거부한다. 작업자는 정확한 `provider/model-id`와 구체적인 effort를 직접 적는다. 메인 목록에 같은 model+effort 항목을 두 번 쓰는 것도 거부하며, 작업자는 각자 별도 정의이므로 같은 모델·effort를 공유할 수 있다.
+- OMP는 목록 항목마다 `provider/model [effort]` 형태의 사람이 읽는 슬롯을 만들고 YAML 순서대로 순환시키며 시작 기본값을 첫 항목으로 둔다. 내장 model role 이름은 picker에서 숨겨지지만 **비활성화가 아니다.** 내부 helper의 자동 모델 선택과 별도 소유 alias 의존성은 그대로 동작하고, 내장 task agent의 프롬프트·도구·출력 계약은 삭제하거나 끄지 않는다.
+- OMP 내장 15개 model role에 남아 있던 기존 배정과 예전 저장소 alias `deep`·`review`를 정리하고, 숨김 `default`만 첫 항목으로 다시 지정한다. 다른 비관리 값이 `@역할`·`pi/역할`·`*`로 참조하는 역할은 숨김으로 유지하고 stdout에 보고한다. 정리는 값 단위로 소유되어 제거 시 이전 값이 복원되며, OMP `enabledModels`는 설정하지 않는다.
+- pi는 새 세션의 시작값을 첫 항목에서 정하고 같은 목록을 Ctrl+P 순환 범위로 쓴다. 메인 목록에 같은 모델을 두 번(어느 effort든) 나열하면 하나를 조용히 버리지 않고 명확히 실패한다. OMP는 같은 모델의 서로 다른 effort를 허용한다. 메인 순환은 생성된 작업자 정의를 다시 쓰지 않는다.
+- `config.example.yaml`과 README를 v3 구조로 갱신하고, INSTALL에 v3 형식·Ctrl+P 동작·숨김과 비활성화의 구분을 추가했다. 예제는 한 배포의 현재 등록 id를 구조 예시로 쓴 초안이며 추천 구성이나 즉시 배포용 preset이 아니다.
+- INSTALL의 전환 절차를 v1·v2 → v3로 다시 썼다. installer는 source YAML을 자동 수정하지 않으며, 기존 선택을 다시 고르게 하지 않고 이름만 보고 더 좋은 모델을 추천하지도 않는다.
+
+### 확인 범위
+
+- `npm test`: **27개 통과**. v3 입력 경계, 모델 목록 재구성, 독립 alias 소비자 보존, 설치·재설치·제거 시 복구와 실제 pi-subagents 통합을 포함한다.
+- OMP 18.12.1에 개인 YAML을 적용하고 재설치가 `Already installed; no changes.`로 끝나는 것을 확인했다. 새 TUI에서 Sol/high → Astra/high → Flash/high → Sol/high 순환을 직접 관측했다. 격리된 OMP TUI에서는 모델·effort 이름의 세 항목만 표시되고 내장 role 이름이 숨겨지며, high → low 전환도 적용되는 것을 확인했다.
+- pi 1.3.0의 격리된 TUI에서 Sol/high → Astra/low → Flash/high → Sol/high 순환을 직접 관측했다. pi-subagents 0.79.1 통합 검사는 로컬 HTTP 제공자를 통해 작업자의 고정 모델·effort, 허용 도구, 중첩 위임과 이미지 전달을 확인했다. 사용자 pi 프로필에 새 플러그인을 설치하거나 설정을 적용하지는 않았다.
+- OMP와 pi의 TUI 모델 전환 뒤에도 설치 dry-run에서 추가 쓰기가 없었다. OMP 실제 설정에서 작업자별 명시적 모델·effort가 유지되는 것을 확인했으며, 상용 작업자 모델의 응답 품질이나 과금은 검증하지 않았다.
+- 예제 모델은 현재 개인 배포의 등록 id·지원 effort를 구조 예시로 사용했다. 다른 프로필의 가용성을 보장하지 않는다. 기본 role 숨김은 비활성화가 아니며, 내부 helper 자동 선택과 독립 소비자가 필요한 숨김 매핑은 유지된다.
+
 ## 2026-10-20 · 설치 AI의 모델 비교와 사용자 인터뷰
 
 ### 변경

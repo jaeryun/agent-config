@@ -14,6 +14,11 @@ const BEGIN = '<!-- agent-config:begin -->';
 const END = '<!-- agent-config:end -->';
 const missing = { exists: false };
 const OMP_BUILTINS = new Set(['task', 'sonic', 'scout', 'reviewer', 'security-reviewer', 'seance']);
+// OMP's 15 built-in model role ids (packages/coding-agent/src/config/model-roles.ts), plus the
+// alias roles the previous release of this repository created and now only preserves as dependencies.
+const OMP_ROLES = ['default', 'smol', 'slow', 'vision', 'plan', 'commit', 'tiny', 'memory', 'task', 'advisor', 'image', 'web', 'speech', 'dictation', 'judge'];
+const OMP_OBSOLETE_ROLES = ['deep', 'review'];
+const LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const fail = message => { throw new Error(message); };
 const own = (object, key) => Object.hasOwn(object, key);
 const inside = (child, parent) => child === parent || child.startsWith(parent + path.sep);
@@ -93,7 +98,7 @@ function readConfig(file, client, target) {
   if (!stat(file)) fail(`Configuration is required: ${file}. Create your private YAML from config.example.yaml; no example is installed automatically.`);
   const config = yamlDocument(fs.readFileSync(file, 'utf8'), file).toJS({ maxAliasCount: 0 });
   fields(config, ['version', 'concurrency', 'agents'], 'config');
-  if (config.version !== 2) fail('config.version must be 2. Migrate v1 using INSTALL.md: remove tools.omp/spawns.omp for OMP builtins and use native/native or an explicit model/effort pair. The installer never rewrites your source YAML.');
+  if (config.version !== 3) fail('config.version must be 3. Migrate the file: agents.orchestrator replaces model+effort with an ordered `models: [{model, effort}, ...]` list whose first entry is the startup default; every model must be an exact provider/model-id and every effort a concrete level (inherit/native/@alias/glob are rejected). The installer never rewrites your source YAML.');
   if (!Number.isSafeInteger(config.concurrency) || config.concurrency < 1) fail('config.concurrency must be a positive integer');
   object(config.agents, 'config.agents');
   if (!own(config.agents, 'orchestrator')) fail('config.agents.orchestrator is required');
@@ -101,7 +106,14 @@ function readConfig(file, client, target) {
   const result = [];
   for (const [name, agent] of Object.entries(config.agents)) {
     if (!/^[a-z][a-z0-9-]*$/.test(name) || ['main', 'sub', '__proto__', 'constructor', 'prototype'].includes(name)) fail(`Unsafe agent name: ${name}`);
-    fields(agent, ['description', 'definition', 'model', 'effort', 'tools', 'spawns', 'extensions'], `agents.${name}`);
+    const orchestrator = name === 'orchestrator';
+    if (orchestrator && (own(agent, 'model') || own(agent, 'effort'))) {
+      fail('agents.orchestrator must use models: [{model, effort}, ...]; version 3 replaced the single model/effort pair with an ordered choice list whose first entry is the startup default');
+    }
+    if (orchestrator && ['tools', 'spawns', 'extensions'].some(key => own(agent, key))) {
+      fail('orchestrator tools/spawns/extensions are unsupported; these are worker-only mappings');
+    }
+    fields(agent, orchestrator ? ['description', 'definition', 'models'] : ['description', 'definition', 'model', 'effort', 'tools', 'spawns', 'extensions'], `agents.${name}`);
     const native = client === 'omp' && OMP_BUILTINS.has(name);
     if (client === 'pi' && name === 'seance') fail('seance requires the native OMP historical-session runtime and has no pi port; omit it from a configuration used for pi.');
     const description = text(agent.description, `${name}.description`);
@@ -111,30 +123,62 @@ function readConfig(file, client, target) {
     if (!inside(source, base) || inside(source, target)) fail(`Definition escapes config directory or overlaps target: ${definition}`);
     const prompt = fs.readFileSync(source, 'utf8').trim();
     if (!prompt || /^---(?:\r?\n|$)/.test(prompt) || prompt.includes(BEGIN) || prompt.includes(END)) fail(`${name}.definition must be nonempty neutral Markdown without frontmatter or installer markers`);
-    const select = key => {
-      const value = agent[key];
-      if (typeof value === 'string') return text(value, `${name}.${key}`);
-      fields(value, ['omp', 'pi'], `${name}.${key}`);
-      for (const item of Object.values(value)) text(item, `${name}.${key}`);
-      return text(value[client], `${name}.${key}.${client}`);
+    // A model/effort field is a scalar or an explicit {omp, pi} mapping resolved for the target client.
+    const clientValue = (key, bag, label) => {
+      const value = bag[key];
+      if (value === undefined) fail(`${label} is required`);
+      if (typeof value === 'string') return text(value, label);
+      fields(value, ['omp', 'pi'], label);
+      for (const item of Object.values(value)) text(item, label);
+      if (!own(value, client)) fail(`${label} must be a string or a {omp, pi} mapping that provides ${client}`);
+      return text(value[client], `${label}.${client}`);
     };
-    const model = select('model');
-    const effort = select('effort');
-    const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-    if (native) {
-      if (!(model === 'native' && effort === 'native') &&
-        (['native', 'inherit'].includes(model) || !levels.includes(effort))) {
-        fail(`${name}: OMP builtin model/effort must both be native (preserve native routing) or both explicit. inherit does not preserve the native role contract.`);
+    const exactModel = (value, label) => {
+      const model = text(value, label);
+      if (model === 'inherit') fail(`${label} must be an exact provider/model-id. Version 3 removed inherit: main cycling and worker assignments must name the model they use instead of following another one.`);
+      if (model === 'native') fail(`${label} must be an exact provider/model-id. Version 3 removed the native model sentinel: an OMP builtin name keeps its native definition, tools and spawn policy, but takes an explicit model and effort here.`);
+      if (model.startsWith('@')) fail(`${label} must be an exact provider/model-id, not an @alias`);
+      if (model.startsWith('pi/')) fail(`${label} must name the concrete provider/model-id. \`pi/<role>\` is OMP's portability role alias (not a provider), so it is rejected like every other role alias.`);
+      if (/[*?\[\]]/.test(model) || !/^[a-zA-Z0-9_-]+\/[^\s,]+$/.test(model) || /:(inherit|off|minimal|low|medium|high|xhigh|max|auto)$/.test(model)) {
+        fail(`${label} must be an exact provider/model-id without an effort suffix, alias, or glob`);
       }
-    } else if (model === 'native' || effort === 'native') {
-      fail(`${name}: native is only supported for OMP builtins`);
+      return model;
+    };
+    const exactEffort = (value, label) => {
+      const effort = text(value, label);
+      if (effort === 'inherit' || effort === 'native') fail(`${label} must be a concrete effort (${LEVELS.join(', ')}); version 3 removed inherit/native efforts`);
+      if (!LEVELS.includes(effort)) fail(`Unsupported ${label}: ${effort}. Use one of ${LEVELS.join(', ')}.`);
+      return effort;
+    };
+    let models = null, model = null, effort = null;
+    if (orchestrator) {
+      if (!Array.isArray(agent.models) || !agent.models.length) fail('agents.orchestrator.models must be a nonempty ordered list of {model, effort} choices; the first entry is the startup default');
+      models = agent.models.map((choice, index) => {
+        const label = `agents.orchestrator.models[${index}]`;
+        fields(choice, ['model', 'effort'], label);
+        const chosenModel = exactModel(clientValue('model', choice, `${label}.model`), `${label}.model`);
+        const chosenEffort = exactEffort(clientValue('effort', choice, `${label}.effort`), `${label}.effort`);
+        return { model: chosenModel, effort: chosenEffort, label: `${chosenModel} [${chosenEffort}]` };
+      });
+      const seen = new Set();
+      for (const choice of models) {
+        const id = `${choice.model}\u0000${choice.effort}`;
+        if (seen.has(id)) fail(`agents.orchestrator.models repeats the same model+effort choice: ${choice.label}. Each main choice must be unique.`);
+        seen.add(id);
+      }
+      if (client === 'pi') {
+        const byModel = new Map();
+        for (const choice of models) {
+          if (byModel.has(choice.model)) {
+            fail(`agents.orchestrator.models lists ${choice.model} twice (${byModel.get(choice.model)} and ${choice.effort}). Pi 1.3.0 resolves the main scope by model identity and would silently drop one of them; use one entry per Pi model (OMP may repeat a model with different efforts).`);
+          }
+          byModel.set(choice.model, choice.effort);
+        }
+      }
+    } else {
+      model = exactModel(clientValue('model', agent, `${name}.model`), `${name}.model`);
+      effort = exactEffort(clientValue('effort', agent, `${name}.effort`), `${name}.effort`);
     }
-    if (!['inherit', 'native'].includes(model) &&
-      (!/^[a-zA-Z0-9_-]+\/[^\s,]+$/.test(model) || /[*?\[\]@]/.test(model) || /:(inherit|off|minimal|low|medium|high|xhigh|max|auto)$/.test(model))) {
-      fail(`${name}.model must be an exact provider/model-id without an effort suffix, alias, or glob`);
-    }
-    if (![...levels, 'inherit', 'native'].includes(effort)) fail(`Unsupported ${name}.effort: ${effort}`);
-    if (name === 'orchestrator' && ((model === 'inherit') !== (effort === 'inherit'))) fail('Orchestrator model and effort must both inherit or both be explicit');
     const toolMap = agent.tools ?? {};
     const spawnMap = agent.spawns ?? {};
     const extensionMap = agent.extensions ?? {};
@@ -154,12 +198,9 @@ function readConfig(file, client, target) {
       }
     }
     let tools = [], spawns = spawnMap[client] ?? [], extensions;
-    if (name === 'orchestrator') {
-      if (['tools', 'spawns', 'extensions'].some(key => own(agent, key))) fail('orchestrator tools/spawns/extensions are unsupported; these are worker-only mappings');
-    } else if (!native) {
+    if (!native && !orchestrator) {
       if (!Array.isArray(toolMap[client])) fail(`${name}.tools.${client} is required`);
       tools = toolMap[client];
-      if (client === 'omp' && effort === 'inherit') fail(`${name}: custom OMP workers require explicit effort; live parent effort inheritance is unavailable`);
       if (client === 'pi' && !tools.length) fail(`${name}: specify a nonempty Pi tool allowlist; an empty plugin field can inherit default tools`);
       if (tools.some(tool => ['task', 'subagent', 'subagents_enable', 'agent_config_task'].includes(tool)) && spawns !== '*' && !spawns.length) {
         fail(`${name}: delegation tools require an explicit spawns grant`);
@@ -174,7 +215,9 @@ function readConfig(file, client, target) {
         return resolved;
       });
     }
-    result.push({ name, description, prompt, model, effort, tools, spawns, extensions, native });
+    result.push(orchestrator
+      ? { name, description, prompt, models }
+      : { name, description, prompt, model, effort, tools, spawns, extensions, native });
   }
   return { concurrency: config.concurrency, agents: result };
 }
@@ -239,7 +282,6 @@ function checkPiOverrides(config, editor) {
     for (const [provider, overrides] of Object.entries(subagents.agentOverridesByProvider ?? {})) {
       if (own(overrides, agent.name)) fail(`subagents.agentOverridesByProvider.${provider}.${agent.name} would override the generated definition. Reconcile it with your local YAML before installing.`);
     }
-    if (agent.effort === 'inherit' && own(subagents, 'defaultThinking')) fail(`${agent.name}: effort=inherit conflicts with subagents.defaultThinking. Set an explicit local effort or resolve that plugin default; the installer will not silently replace it.`);
   }
 }
 
@@ -282,52 +324,130 @@ function mergeSettings(editor, wanted, previous) {
   }
   return { changes, containers, changed };
 }
-function desiredSettings(client, config, editor) {
-  const entries = [];
-  const put = (parts, value) => entries.push({ path: parts, installed: { exists: true, value } });
-  const remove = parts => entries.push({ path: parts, installed: missing });
+// OMP resolves a settings value as a role reference only through these prefixes (config/model-roles.ts
+// xa/xv): `@role`, `pi/role`, and the `*` default. Values are comma lists, so every comma-separated
+// item is checked, and the optional suffix is any native thinking level, including `auto`/`inherit`.
+const ALIAS_PREFIXES = ['@', 'pi/'];
+const ALIAS_LEVELS = [...LEVELS, 'auto', 'inherit'];
+function aliasedRoles(value, aliases) {
+  const roles = new Set();
+  for (const item of String(value).split(',')) {
+    const text = item.trim();
+    const star = text === '*' || text.startsWith('*:');
+    const prefix = star ? '' : ALIAS_PREFIXES.find(candidate => text.startsWith(candidate));
+    if (prefix === undefined) continue;
+    const parts = text.slice(prefix.length).split(':');
+    const level = parts.length === 2 && ALIAS_LEVELS.includes(parts[1]);
+    const role = star ? 'default' : (parts.length === 1 || level) ? parts[0] : undefined;
+    if (role && aliases.has(role)) roles.add(role);
+  }
+  return roles;
+}
+function roleReferences(document, aliases, references = new Map(), trail = []) {
+  if (typeof document === 'string') {
+    for (const role of aliasedRoles(document, aliases)) {
+      if (!references.has(role)) references.set(role, new Set());
+      references.get(role).add(trail.join('.') || '(document)');
+    }
+  } else if (Array.isArray(document)) {
+    document.forEach((item, index) => roleReferences(item, aliases, references, [...trail, String(index)]));
+  } else if (document && typeof document === 'object') {
+    for (const [key, item] of Object.entries(document)) roleReferences(item, aliases, references, [...trail, key]);
+  }
+  return references;
+}
+function assign(target, parts, slot) {
+  let cursor = target;
+  for (const key of parts.slice(0, -1)) {
+    if (!cursor[key] || typeof cursor[key] !== 'object') cursor[key] = {};
+    cursor = cursor[key];
+  }
+  if (slot.exists) cursor[parts.at(-1)] = slot.value;
+  else delete cursor[parts.at(-1)];
+}
+function desiredSettings(client, config, editor, previous) {
+  // Keyed by path so a leaf can never be installed twice (a duplicate would record the installer's own
+  // value as `before` and break restore).
+  const entries = new Map();
+  const put = (parts, value) => entries.set(JSON.stringify(parts), { path: parts, installed: { exists: true, value } });
+  const remove = parts => entries.set(JSON.stringify(parts), { path: parts, installed: missing });
   const main = config.agents.find(agent => agent.name === 'orchestrator');
+  const [startup] = main.models;
   if (client === 'omp') {
     put(['task', 'maxConcurrency'], config.concurrency);
     const workers = config.agents.filter(agent => agent.name !== 'orchestrator');
     const names = workers.map(agent => agent.name);
-    for (const agent of workers) {
-      if (agent.native && agent.model === 'native') continue;
-      if (agent.model === 'inherit') remove(['task', 'agentModelOverrides', agent.name]);
-      else put(['task', 'agentModelOverrides', agent.name], `${agent.model}:${agent.effort}`);
-    }
+    for (const agent of workers) put(['task', 'agentModelOverrides', agent.name], `${agent.model}:${agent.effort}`);
     const disabled = editor.get(['task', 'disabledAgents']);
     if (disabled.exists) {
       if (!Array.isArray(disabled.value)) fail('task.disabledAgents must be an array');
       const conflicts = disabled.value.filter(name => names.includes(name));
       if (conflicts.length) fail(`Configured OMP roles are disabled by task.disabledAgents: ${conflicts.join(', ')}. Remove those names explicitly before installing; unrelated disabled roles are preserved.`);
     }
-    if (main.model !== 'inherit') {
-      put(['modelRoles', 'default'], `${main.model}:${main.effort}`);
-      put(['defaultThinkingLevel'], main.effort);
+    // Ctrl+P cycles these literal role ids, so each choice needs a readable role key of its own; the
+    // modelTags name is what the selector shows for the same key.
+    for (const choice of main.models) {
+      put(['modelRoles', choice.label], `${choice.model}:${choice.effort}`);
+      put(['modelTags', choice.label, 'name'], choice.label);
+      put(['modelTags', choice.label, 'hidden'], false);
     }
-  } else if (main.model !== 'inherit') {
-    const slash = main.model.indexOf('/');
-    put(['defaultProvider'], main.model.slice(0, slash));
-    put(['defaultModel'], main.model.slice(slash + 1));
-    put(['defaultThinkingLevel'], main.effort);
+    put(['modelRoles', 'default'], `${startup.model}:${startup.effort}`);
+    put(['cycleOrder'], main.models.map(choice => choice.label));
+    put(['defaultThinkingLevel'], startup.effort);
+    for (const role of OMP_ROLES) put(['modelTags', role, 'hidden'], true);
+    // Built-in role allocations are cleaned up, but a mapping another consumer still references by
+    // alias must survive: removing it would silently reroute that consumer to a native fallback.
+    // A role is cleared when it currently holds a value or when an earlier install already cleared it,
+    // so the wanted removals stay identical across reinstalls instead of oscillating.
+    const document = editor.get([]).value;
+    const current = document && typeof document.modelRoles === 'object' && document.modelRoles !== null && !Array.isArray(document.modelRoles) ? document.modelRoles : {};
+    const owned = new Set((previous?.changes ?? []).filter(record => record.path.length === 2 && record.path[0] === 'modelRoles').map(record => record.path[1]));
+    const managed = [...OMP_ROLES, ...OMP_OBSOLETE_ROLES].filter(role => role !== 'default');
+    const present = new Set(managed.filter(role => own(current, role)));
+    const cleared = managed.filter(role => owned.has(role) && !own(current, role));
+    const aliases = new Set([...OMP_ROLES, ...Object.keys(current)]);
+    const installed = structuredClone(document ?? {});
+    for (const entry of entries.values()) assign(installed, entry.path, entry.installed);
+    for (const role of present) assign(installed, ['modelRoles', role], missing);
+    let references = roleReferences(installed, aliases);
+    const retained = new Map();
+    for (let pass = 0; pass < present.size; pass++) {
+      const dependency = [...present].find(role => !retained.has(role) && references.has(role));
+      if (!dependency) break;
+      retained.set(dependency, references.get(dependency));
+      assign(installed, ['modelRoles', dependency], { exists: true, value: current[dependency] });
+      references = roleReferences(installed, aliases);
+    }
+    for (const [role, paths] of retained) {
+      console.log(`Preserving modelRoles.${role} (hidden): ${[...paths].sort().join(', ')} still reference that role by alias; removing the mapping would silently reroute the same consumer.`);
+      put(['modelTags', role, 'hidden'], true);
+    }
+    for (const role of [...present].filter(role => !retained.has(role)).concat(cleared)) remove(['modelRoles', role]);
+    const assigned = installed.modelRoles && typeof installed.modelRoles === 'object' ? installed.modelRoles : {};
+    const unassigned = [...references.keys()].filter(role => role !== 'default' && !own(assigned, role) && !retained.has(role)).sort();
+    if (unassigned.length) console.log(`Note: alias references without a modelRoles assignment: ${unassigned.join(', ')}. OMP resolves built-in role names through its native fallback chain; a non-builtin name stays a literal model pattern and its consumer may fail.`);
+  } else {
+    const slash = startup.model.indexOf('/');
+    put(['defaultProvider'], startup.model.slice(0, slash));
+    put(['defaultModel'], startup.model.slice(slash + 1));
+    put(['defaultThinkingLevel'], startup.effort);
+    put(['enabledModels'], main.models.map(choice => `${choice.model}:${choice.effort}`));
   }
-  return entries;
+  return [...entries.values()];
 }
 function render(config, client) {
   const files = {};
   const workers = config.agents.filter(agent => agent.name !== 'orchestrator');
   const main = config.agents.find(agent => agent.name === 'orchestrator');
   const capability = client === 'omp'
-    ? `OMP transport: use native task/eval schemas and role permissions as exposed by the runtime; do not assume a particular batch mode or recursion limit. Builtin names retain OMP's own definitions, tools and output contracts. Configured roles: ${workers.map(agent => `${agent.name}${agent.native ? ' (native)' : ' (custom)'}`).join(', ') || '(none managed)'}. Other native roles, including seance, are not disabled. Models marked native retain existing OMP routing, not necessarily the active parent model.`
+    ? `OMP transport: use native task/eval schemas and role permissions as exposed by the runtime; do not assume a particular batch mode or recursion limit. Builtin names retain OMP's own definitions, tools and output contracts. Configured roles: ${workers.map(agent => `${agent.name}${agent.native ? ' (native definition, explicit model from the YAML)' : ' (custom definition)'}`).join(', ') || '(none managed)'}. Other native roles, including seance, are not disabled. Every worker model and effort comes from the YAML assignment and never follows the main session model; Ctrl+P cycles only the orchestrator's configured models for the current session.`
     : workers.length
-      ? `Pi transport: use the existing nicobailon/pi-subagents subagent tool. Configured roles: ${workers.map(agent => `${agent.name}: ${agent.description}`).join('; ')}. If only subagents_enable is available, activate it first. Use {agent, task, options:{context:"fresh"}} for a single assignment; shared instructions belong in task, not the context enum. Use native workflow/status/steer/resume/supervisor facilities. Nested delegation follows each role's grant and native limits. Per-run concurrency default: ${config.concurrency}. There is no pi seance equivalent or OMP agent:// transport.`
+      ? `Pi transport: use the existing nicobailon/pi-subagents subagent tool. Configured roles: ${workers.map(agent => `${agent.name}: ${agent.description}`).join('; ')}. If only subagents_enable is available, activate it first. Use {agent, task, options:{context:"fresh"}} for a single assignment; shared instructions belong in task, not the context enum. Use native workflow/status/steer/resume/supervisor facilities. Nested delegation follows each role's grant and native limits. Per-run concurrency default: ${config.concurrency}. Every worker model and effort comes from the YAML assignment and never follows the main session model. There is no pi seance equivalent or OMP agent:// transport.`
       : 'No repository-managed worker roles. Existing plugin/user roles are not disabled; discover the actual runtime inventory before delegating.';
   const block = `${BEGIN}\n${main.prompt}\n\n## Client capabilities\n\n${capability}\n${END}`;
   if (client === 'omp') {
     for (const agent of workers.filter(agent => !agent.native)) {
-      const frontmatter = { name: agent.name, description: agent.description, tools: agent.tools, spawns: agent.spawns, thinkingLevel: agent.effort };
-      if (agent.model !== 'inherit') frontmatter.model = `${agent.model}:${agent.effort}`;
+      const frontmatter = { name: agent.name, description: agent.description, tools: agent.tools, spawns: agent.spawns, model: `${agent.model}:${agent.effort}`, thinkingLevel: agent.effort };
       files[`extensions/agent-config/agents/${agent.name}.md`] = `---\n${YAML.stringify(frontmatter, { lineWidth: 0 })}---\n\n${agent.prompt}\n\n## OMP transport\n\nUse native OMP communication and completion tools. Delegation follows this role's configured spawn grant and the native runtime limits. Relevant context is supplied in the assignment; report concrete blockers to the parent.\n`;
     }
   } else {
@@ -342,7 +462,7 @@ function render(config, client) {
         defaultContext: 'fresh', allowNestedSubagents: nesting,
       };
       if (Array.isArray(agent.spawns) && agent.spawns.length) frontmatter.allowedAgents = agent.spawns.join(', ');
-      if (agent.effort !== 'inherit') frontmatter.thinking = agent.effort;
+      frontmatter.thinking = agent.effort;
       if (agent.extensions?.length) frontmatter.extensions = agent.extensions;
       // The plugin's scalar-list parser treats a YAML inline [] as a literal name.
       const emptyExtensions = agent.extensions?.length === 0 ? 'extensions:\n' : '';
@@ -499,7 +619,7 @@ function main() {
         settingsChanged = true;
       }
     }
-    const wanted = config ? desiredSettings(opt.client, config, editor) : [];
+    const wanted = config ? desiredSettings(opt.client, config, editor, old?.settings) : [];
     const { changes, containers, changed } = mergeSettings(editor, wanted, old?.settings);
     settingsChanged ||= changed;
     const settingsOutput = editor.output();
@@ -530,9 +650,12 @@ function main() {
     }
     if (config) {
       console.log(`Requested ${opt.client} mapping (no installer substitution):`);
-      for (const agent of config.agents) console.log(`  ${agent.name}: model=${agent.model}; effort=${agent.effort}${agent.name === 'orchestrator' ? '' : `; tools=${agent.native ? '(OMP native)' : agent.tools.join(',') || '(none)'}`}`);
+      for (const agent of config.agents) {
+        if (agent.name === 'orchestrator') console.log(`  orchestrator: models=${agent.models.map(choice => choice.label).join(' | ')} (first is the ${opt.client} startup default)`);
+        else console.log(`  ${agent.name}: model=${agent.model}; effort=${agent.effort}; tools=${agent.native ? '(OMP native definition)' : agent.tools.join(',') || '(none)'}`);
+      }
       if (opt.client === 'omp') console.warn('WARNING: OMP native runtime may auth-fallback or clamp unsupported effort. Installation renders requested selectors only. Verify available model/auth and actual resolved worker model/effort; any mismatch is a failed runtime acceptance check.');
-      if (config.agents.find(agent => agent.name === 'orchestrator').model !== 'inherit') console.warn(`WARNING: Explicit ${opt.client} startup model/effort requires native capability and actual loaded-value verification. A native fallback, clamp, or ignored startup value is a failed acceptance check, not a successful configuration.`);
+      console.warn(`WARNING: The explicit ${opt.client} startup model/effort requires native capability and actual loaded-value verification. A native fallback, clamp, or ignored startup value is a failed acceptance check, not a successful configuration.`);
       if (piWorkers) console.warn('Pi definitions are installed for pi-subagents, not executed by this repository. Verify /subagents-models and /subagents-doctor in a new session; project definitions/settings and native effort handling may change effective values.');
     }
     const manifestText = JSON.stringify(next, null, 2) + '\n';
