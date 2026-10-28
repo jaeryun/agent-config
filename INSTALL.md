@@ -168,6 +168,12 @@ extensions:
 
 경로는 YAML 기준으로 해석해 존재하는 절대 경로로 설치한다. 파일 또는 plugin이 허용하는 디렉터리다. 미설치 도구를 가정하거나 이 저장소가 새 extension을 작성하지 않는다. `extensions: {pi: []}`는 ambient extension을 끈다는 뜻이며 provider extension까지 사라질 수 있다. 실제 자식 로딩을 확인한다.
 
+### MCP는 사용자 환경
+
+- MCP 서버·자격 증명·exposure·연결 상태는 이 저장소가 관리하지 않는다. 각 사용자 pi 프로필의 `mcp.json`(또는 trusted 프로젝트 `.pi/mcp.json`)과 pi의 `/mcp` 동작을 따른다.
+- installer는 `mcp.json`을 읽거나 생성·수정하지 않는다. YAML의 `tools.pi`는 pi가 해석하는 도구 이름을 그대로 생성 정의에 기록하며, 환경에 `mcp:<server>[/<tool>]` selector가 있으면 pi-subagents가 자체 규칙으로 해석한다.
+- 서버가 없거나, 아직 연결되지 않았거나, exposure 정책상 보이지 않는 경우의 실패는 사용자 환경에서 `pi mcp list`와 실제 자식 실행으로 확인한다. 이 저장소는 그 상태를 검사하거나 바꾸지 않는다.
+
 ### 저가 비전 배정
 
 - image-analyst에는 실제 가용한 저가 이미지 입력 모델과 적절한 effort를 고른다. 예제의 모델·effort는 구조 예시일 뿐 이미지 지원·더 낮은 가격의 보장이 아니며, 같은 고가 모델을 배정해 놓고 비용이 분리됐다고 보고하지 않는다.

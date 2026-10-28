@@ -28,6 +28,8 @@
 # in agents.orchestrator.models. Declare distinct models for a shared list. The rule applies to
 # the main list only: workers are separate definitions and may reuse another role's model+effort.
 # Optional extensions: {pi: ["./.local/my-browser-extension.ts"]} loads existing child tools.
+# MCP servers, credentials, exposure, and connection state are per-user pi environment state.
+# This file does not manage them; tools.pi records pi tool names/selectors as written.
 # Pi concurrency is per-run. No repository-owned runner or global scheduler is installed.
 version: 3
 concurrency: 3

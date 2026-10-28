@@ -627,3 +627,34 @@ test('the first main choice is the managed startup default and uninstall restore
     }
   }
 });
+
+test('pi: tool allowlists accept pi-legal names and reject malformed MCP selectors', async (t) => {
+  const f = await fixture(t, 'pi');
+  f.config.agents.deep.tools.pi = ['read', 'mcp:GitLab/search', 'mcp:Demo', 'mcp__Demo__echo'];
+  await f.writeConfig(f.config);
+  const installed = f.run();
+  const definition = await readFile(join(f.target, 'agents/deep.md'), 'utf8');
+  assert.match(definition, /tools: read, mcp:GitLab\/search, mcp:Demo, mcp__Demo__echo/);
+  // MCP server configuration and exposure are user-environment state; installing must not read,
+  // create, or require mcp.json.
+  assert.equal(await f.exists(join(f.target, 'mcp.json')), false);
+  assert.doesNotMatch(installed.stderr, /mcp\.json|exposure/i);
+
+  for (const bad of ['mcp:', 'mcp:GitLab/', 'mcp:GitLab/a/b', 'mcp:/search']) {
+    f.config.agents.deep.tools.pi = ['read', bad];
+    await f.writeConfig(f.config);
+    const rejected = f.command('--dry-run');
+    assert.notEqual(rejected.status, 0, bad);
+    assert.match(rejected.stderr, /tools\.pi/);
+  }
+
+  // An MCP server added to the user's profile before a later install must survive untouched.
+  f.config.agents.deep.tools.pi = ['read', 'mcp:GitLab/search'];
+  await f.writeConfig(f.config);
+  const mcpPath = join(f.target, 'mcp.json');
+  const mcpContent = '{"mcpServers":{"GitLab":{"command":"node","exposure":"codemode"}}}\n';
+  await writeFile(mcpPath, mcpContent);
+  const reinstall = f.run();
+  assert.equal(await readFile(mcpPath, 'utf8'), mcpContent);
+  assert.doesNotMatch(reinstall.stderr, /mcp\.json|exposure/i);
+});

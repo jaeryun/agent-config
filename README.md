@@ -127,7 +127,7 @@ agents:
 
 - `definition`은 YAML 디렉터리 안의 상대 Markdown 경로다. OMP 내장 이름에서는 **pi용 정의**로만 사용한다.
 - 내장 역할의 `tools.omp`·`spawns.omp`는 거부한다. native 도구·권한을 덮어쓰거나 설정을 조용히 무시하지 않기 위해서다.
-- 추가 역할에는 `tools.omp`·`tools.pi`를 지정한다. pi extension/MCP 도구는 실제 제공되는 이름과 필요한 extension을 확인한다.
+- 추가 역할에는 `tools.omp`·`tools.pi`를 지정한다. pi extension/MCP 도구는 실제 제공되는 이름과 필요한 extension을 확인한다. **MCP 서버·자격 증명·exposure·연결 상태는 이 저장소가 관리하지 않으며 각 사용자 pi 환경을 따른다.** installer는 `mcp.json`을 읽거나 수정하지 않고, `tools.pi`의 이름을 pi 문법으로 검증해 생성 정의에 그대로 기록한다. 환경에 `mcp:<server>[/<tool>]` selector가 있으면 pi-subagents가 자체 규칙으로 해석한다.
 - `spawns`는 환경별 `"*"` 또는 역할 이름 배열이다. 기본은 빈 배열이다. pi에서 grant가 있으면 네이티브 재위임 도구와 allowlist를 함께 연결하며 runtime depth/정책 제한은 유지한다.
 - `extensions: {pi: ["./.local/browser-extension.ts"]}`로 이미 존재하는 자식용 extension을 지정할 수 있다. 경로는 YAML 기준으로 해석한다. 빈 배열은 ambient extension 비활성화이며 provider까지 빠질 수 있으므로 주의한다. 이 저장소가 extension을 다운로드하거나 구현하지 않는다.
 - 개인 YAML이 모델·effort 배정의 원본이다. 기존 pi `subagents.agentOverrides`·`agentOverridesByProvider`나 OMP `task.disabledAgents`가 생성 정의와 충돌하면 조용히 덮어쓰지 않고 중단하며, 생성된 설정·정의 파일을 직접 수정하면 재설치 때 외부 변경으로 보고된다.

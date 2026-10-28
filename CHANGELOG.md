@@ -1,5 +1,19 @@
 # 변경 이력
 
+## 2026-10-28 · pi 도구 이름 검증과 MCP 경계
+
+### 변경
+
+- `tools.pi` 검증이 pi가 허용하는 영문 대문자·숫자 도구 이름과 `mcp:<server>`·`mcp:<server>/<tool>` selector를 거부하던 문제를 고쳤다. selector는 첫 `/` 기준으로 구조만 검증해 빈 값·빈 tool·추가 `/`를 거부하며, 서버 존재·exposure·연결 상태는 검사하지 않는다.
+- MCP 서버·자격 증명·exposure·연결 상태는 이 저장소의 관리 대상이 아님을 README·INSTALL·`config.example.yaml`에 명시했다. installer는 `mcp.json`을 읽거나 생성·수정하지 않고, YAML의 `tools.pi`를 생성 정의에 그대로 기록한다.
+- MCP 서버가 없거나 연결 전이거나 exposure상 보이지 않을 때의 실패는 사용자 pi 환경과 pi-subagents의 동작이며, 이 저장소는 그 상태를 바꾸지 않는다.
+
+### 확인 범위
+
+- `npm test`: **28개 통과**. installer 테스트에 pi 대문자 도구 이름과 `mcp:` selector의 pass-through, 잘못된 selector 거부, 설치가 `mcp.json`을 생성·요구하지 않음을 추가했다. 기존 roles·reviewer-grant·vision·broken-extension 실제 pi 통합 검사도 통과한다.
+- `mcp.json`이 없는 대상에 YAML을 적용해 생성된 `agents/deep.md`에 `mcp:GitLab/search`가 그대로 기록되고 installer가 MCP 관련 파일을 만들지 않는 것을 확인했다. MCP 서버가 먼저 추가된 대상에서는 재설치 후 `mcp.json` 내용이 바이트 단위로 유지되고 MCP 관련 경고가 출력되지 않는 것도 확인했다.
+- MCP 서버 연결 전 `mcp:` selector 해석 실패는 재현했으나 이 저장소의 관리 범위가 아니므로 installer 개입 없이 사용자 환경에서 확인하도록 남긴다.
+
 ## 2026-10-21 · YAML v3: 메인 모델 목록과 Ctrl+P
 
 ### 변경

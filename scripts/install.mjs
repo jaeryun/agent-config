@@ -37,6 +37,21 @@ function text(value, label) {
   if (typeof value !== 'string' || !value.trim() || value !== value.trim()) fail(`${label} must be a nonempty, trimmed string`);
   return value;
 }
+// Pi tool names are case-sensitive and may contain uppercase letters; MCP server names use
+// [A-Za-z0-9_-]. `mcp:<server>` and `mcp:<server>/<tool>` are pi-subagents direct-tool selectors;
+// the plugin splits a selector at its first slash, so a tool part cannot contain another slash.
+const PI_TOOL = /^[A-Za-z0-9_][A-Za-z0-9_:./-]*$/;
+const MCP_SERVER = /^[A-Za-z0-9_-]+$/;
+const MCP_TOOL = /^[^/,\s]+$/;
+function piToolName(value) {
+  if (typeof value !== 'string' || !value || value !== value.trim()) return false;
+  if (!value.startsWith('mcp:')) return PI_TOOL.test(value);
+  const selector = value.slice(4);
+  const slash = selector.indexOf('/');
+  const server = slash === -1 ? selector : selector.slice(0, slash);
+  const tool = slash === -1 ? null : selector.slice(slash + 1);
+  return MCP_SERVER.test(server) && (tool === null || MCP_TOOL.test(tool));
+}
 function yamlDocument(source, label) {
   const doc = YAML.parseDocument(source, { uniqueKeys: true, stringKeys: true });
   if (doc.errors.length || doc.warnings.length) fail(`Invalid YAML in ${label}: ${(doc.errors[0] ?? doc.warnings[0]).message}`);
@@ -189,8 +204,12 @@ function readConfig(file, client, target) {
       fail(`${name}: tools.omp/spawns.omp cannot override an OMP builtin. Its definition, tools, output and spawn policy remain native; configure only the pi mapping.`);
     }
     for (const [toolClient, names] of Object.entries(toolMap)) {
-      const valid = toolClient === 'pi' ? /^[a-z][a-z0-9_:/.-]*$/ : /^[a-z][a-z0-9_-]*$/;
-      if (!Array.isArray(names) || names.some(item => typeof item !== 'string' || !valid.test(item)) || new Set(names).size !== names.length) fail(`${name}.tools.${toolClient} must be an array of distinct tool names`);
+      const valid = toolClient === 'pi' ? piToolName : value => typeof value === 'string' && /^[a-z][a-z0-9_-]*$/.test(value);
+      if (!Array.isArray(names) || names.some(item => !valid(item)) || new Set(names).size !== names.length) {
+        fail(toolClient === 'pi'
+          ? `${name}.tools.pi must be an array of distinct pi tool names or mcp:<server>[/<tool>] selectors`
+          : `${name}.tools.omp must be an array of distinct tool names`);
+      }
     }
     for (const [spawnClient, names] of Object.entries(spawnMap)) {
       if (names !== '*' && (!Array.isArray(names) || names.some(item => typeof item !== 'string' || !/^[a-z][a-z0-9-]*$/.test(item)) || new Set(names).size !== names.length)) {
