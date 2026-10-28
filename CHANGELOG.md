@@ -1,5 +1,18 @@
 # 변경 이력
 
+## 2026-10-29 · 개인 OMP 모델 배정 갱신
+
+### 변경
+
+- 개인 YAML의 OMP 메인 선택 항목과 scout·sonic 배정을 정확한 등록 ID인 `opencode-go/deepseek-v4.1-flash`로 맞췄다. 기존 선택 항목의 표시 이름과 실제 모델 ID가 달랐던 상태를 정리했다. pi용 DeepSeek 배정은 유지했다.
+- 메인 모델 목록 끝에 `openai-codex/gpt-6.1-terra [high]`를 추가했다. 시작 모델 Sol/high와 기존 task의 Terra/high 배정은 유지했다. 이번 적용 대상은 OMP이며 pi 프로필은 변경하지 않았다.
+
+### 확인 범위
+
+- `omp models find … --json`에서 두 모델의 정확한 selector와 설정한 effort 지원을 확인했다.
+- OMP 설치 dry-run과 실제 적용이 성공했다. `omp config get`으로 메인 순환 순서, 표시 이름과 실제 ID의 일치, scout·sonic의 V4.1 Flash/low 배정을 확인했다.
+- 상용 모델 호출과 진행 중인 세션의 모델 전환은 검증하지 않았다. 복사된 설정은 새 세션에서 로딩한다.
+
 ## 2026-10-28 · pi 도구 이름 검증과 MCP 경계
 
 ### 변경
