@@ -1,5 +1,20 @@
 # 변경 이력
 
+## 2026-11-07 · OMP 런타임 기준으로 개인 배정 정렬
+
+### 변경
+
+- 개인 YAML의 task를 OMP 실제 배정인 `opencode-go/deepseek-v4.1-flash:max`로, reviewer의 OMP effort를 `xhigh`로 맞췄다. pi 배정은 기존 `opencode-go/deepseek-flash:high`와 `openai-codex/gpt-6.1-sol:high`를 유지하도록 per-client effort로 분리했다.
+- 2026-10-29 설치 이후 OMP에서 task·reviewer 관리 값이 바뀌어 installer가 `Managed setting changed externally`로 재설치를 거부하던 상태를 해소했다. 이전 설치 값으로 일시 복원한 뒤 재설치해 YAML과 manifest의 installed 값을 새 배정으로 함께 갱신했다.
+- 나머지 역할(scout·sonic·deep·security-reviewer·image-analyst)과 메인 4종 순환 목록은 이미 YAML과 일치해 변경하지 않았다.
+
+### 확인 범위
+
+- OMP dry-run에서 변경 항목이 task·reviewer 두 개뿐임을 확인한 뒤 실제 설치를 성공시켰다.
+- `config.yml`과 실행 중인 세션의 `cfg://task`가 `task: opencode-go/deepseek-v4.1-flash:max`, `reviewer: openai-codex/gpt-6.1-sol:xhigh`를 보고하는 것을 확인했다.
+- 재차 dry-run이 쓰기 계획 없이 끝나 재설치가 idempotent함을 확인했다.
+- `omp models find`로 배정 selector의 존재와 effort 지원(`deepseek-v4.1-flash` low/high/max, `gpt-6.1-sol` xhigh)을 확인했다. 상용 모델 호출 품질과 과금은 검증하지 않았다.
+
 ## 2026-10-29 · 개인 OMP 모델 배정 갱신
 
 ### 변경
