@@ -27,3 +27,15 @@ agent/config-backups/
 node_modules/
 .tmp/
 .agent-config/
+
+# Rulesync local choices and generated client files
+/rulesync.local.jsonc
+/.rulesync.local/
+/.agents/
+/.claude/
+/.codex/
+/.omp/
+/.opencode/
+/CLAUDE.md
+/opencode.json
+/opencode.jsonc

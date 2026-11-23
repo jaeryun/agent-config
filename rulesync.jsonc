@@ -1,0 +1,11 @@
+{
+  "$schema": "https://github.com/dyoshikawa/rulesync/releases/download/v43.8.0/config-schema.json",
+  "targets": [],
+  "features": ["rules", "subagents"],
+  "outputRoots": ["."],
+  "delete": false,
+  "global": false,
+  "simulateCommands": false,
+  "simulateSubagents": false,
+  "simulateSkills": false
+}
